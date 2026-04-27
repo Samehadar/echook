@@ -110,8 +110,8 @@ The status line displays real-time audio-hooks state and context window usage at
 
 After installing, the status line updates every 60 seconds and shows two lines:
 ```
-[Opus] 🔊 Audio Hooks v5.1.2 | 6/26 Sounds | Webhook: off | Theme: Voice
-🌿 main  ████░░░░ API Quota: 60%  █████░░░ Context: 65% ⚠️ /compact
+[Opus] 🔊 Audio Hooks v5.1.3 | 6/26 Sounds | Webhook: off | Theme: Voice
+🌿 main  ████░░░░ API Quota: 60%  █████░░░ Context: 65% (130K/200K) ⚠️ /compact
 ```
 
 **Customise which status line segments to show**
@@ -218,6 +218,18 @@ Common error codes you may see:
 | `WEBHOOK_HTTP_ERROR` / `WEBHOOK_TIMEOUT` | Webhook unreachable | `audio-hooks webhook test` and inspect the URL |
 
 After running any fix, verify with `audio-hooks logs tail --n 20` to see the recent NDJSON event stream.
+
+## Diagnosing the status line (v5.1.3+)
+
+If a user complains that the **Context: X%** indicator looks wrong (e.g. "it jumped to 97% after I switched models"), this is almost always **expected math** — switching from a 1M-context variant to a 200K window keeps the user's tokens identical but shrinks the denominator 5×. Since v5.1.3 the indicator displays absolute counts (e.g. `Context: 83% (166K/200K)`) so the math is self-explanatory; point the user at that.
+
+If they want to verify what Claude Code is actually piping to the status line script, set `CLAUDE_HOOKS_DEBUG=1` (or `true`/`yes`, case-insensitive) in their shell **before** launching Claude Code. The script then atomically dumps the most recent stdin JSON to `${state_dir}/statusline.last_input.json` after every refresh. Read it with:
+
+```bash
+cat "${CLAUDE_PLUGIN_DATA:-$TEMP/claude_audio_hooks_queue}/statusline.last_input.json"
+```
+
+Inspect `context_window.context_window_size` to confirm whether Claude Code refreshed it after the `/model` switch. Privacy note: the dump may contain workspace paths and the last assistant message — instruct the user to disable the env var when they finish diagnosing.
 
 ## Reading the logs
 

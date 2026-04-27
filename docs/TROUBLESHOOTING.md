@@ -95,6 +95,23 @@ echo '{"session_id":"test","rate_limits":{"five_hour":{"used_percentage":85,"res
 
 Should fire the warning audio once, then be debounced for that `(window, threshold, resets_at)` tuple.
 
+### Context: 97% (or any sudden jump) right after switching models
+
+Not a bug. The percentage Claude Code calculates is `current_tokens / context_window_size`. Switching from a 1M-context variant (e.g. `claude-opus-4-7[1m]`) to a 200K-window model (e.g. default `claude-sonnet-4-6`) keeps your accumulated tokens identical but **shrinks the denominator 5×** — so 17% on Opus 1M legitimately becomes ~83% on Sonnet 200K. Since v5.1.3 the status line displays the underlying numbers explicitly, e.g. `Context: 83% (166K/200K) 🛑 /compact`, so the math is self-evident.
+
+If you want to verify what Claude Code is actually piping to the status line:
+
+```bash
+# Linux/macOS
+export CLAUDE_HOOKS_DEBUG=1 && claude
+# Windows PowerShell
+$env:CLAUDE_HOOKS_DEBUG = "1"; claude
+```
+
+After any status line refresh, the latest stdin JSON is dumped to `${state_dir}/statusline.last_input.json`. Check `context_window.context_window_size` to see what window Claude Code thinks it's using.
+
+> ⚠️ The dump may contain workspace paths and the last assistant message — disable `CLAUDE_HOOKS_DEBUG` when not actively diagnosing.
+
 ### Webhook not receiving events
 
 ```bash

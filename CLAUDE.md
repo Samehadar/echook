@@ -1,6 +1,6 @@
 # Claude Code Audio Hooks — AI Operator Guide
 
-> **Version:** 5.1.2 | **Last Updated:** 2026-04-20
+> **Version:** 5.1.3 | **Last Updated:** 2026-04-28
 
 This document is the canonical machine-facing guide for the claude-code-audio-hooks project. It is written for **Claude Code (and other AI agents) as the operator** — not for humans. A human user says "install audio hooks for me" or "snooze audio for an hour" and you do everything via the project's structured CLI without any human-in-the-loop confirmation, menu navigation, or log file reading.
 
@@ -171,7 +171,7 @@ The canonical state is `audio-hooks hooks list`. Always run that for the live va
 | `CLAUDE_PLUGIN_ROOT` | Plugin install root (auto-set). Used by `runner/run.py` to find bundled `hook_runner.py`. |
 | `CLAUDE_AUDIO_HOOKS_DATA` | Explicit override for state directory (any install type). |
 | `CLAUDE_AUDIO_HOOKS_PROJECT` | Explicit override for project root. |
-| `CLAUDE_HOOKS_DEBUG` | Set to `1` to write debug-level events to the NDJSON log. |
+| `CLAUDE_HOOKS_DEBUG` | Set to `1`/`true`/`yes` (case-insensitive) to write debug-level events to the NDJSON log AND dump the latest status line input JSON to `${state_dir}/statusline.last_input.json`. The dump may include workspace paths and the last assistant message — disable when not actively diagnosing. |
 | `CLAUDE_NONINTERACTIVE` | Set to `1` to force scripts into non-interactive mode regardless of TTY detection. |
 
 ## Webhook payload schema (`audio-hooks.webhook.v1`)
@@ -289,6 +289,8 @@ After editing any canonical file in `/hooks/`, `/bin/`, `/audio/`, or `/config/`
 | "show me the recent errors" | `audio-hooks logs tail --level error --n 20` |
 | "show me the status line" / "monitor context usage" / "show context window" | `audio-hooks statusline install` then restart Claude Code (status line includes color-coded context window usage: 🟢 <50% safe, 🟡 50-80% `/compact`, 🔴 >80% danger) |
 | "only show context in the status line" / "customise status line" | `audio-hooks set statusline_settings.visible_segments '["context"]'` (segments: `model`, `version`, `sounds`, `webhook`, `theme`, `snooze`, `focus`, `branch`, `api_quota`, `context`; empty `[]` = all) |
+| "context jumped from 17% to 83% (or 97%) after I switched models — is this a bug?" | Expected, not a bug. The percentage is `current_tokens / context_window_size`; switching from a 1M-context variant (e.g. `claude-opus-4-7[1m]`) to a 200K-window model (e.g. default `claude-sonnet-4-6`) keeps your tokens the same but shrinks the denominator 5×. The status line now displays absolute counts as `Context: 83% (166K/200K)` so the math is self-evident. |
+| "diagnose what Claude Code is sending to the status line" | `CLAUDE_HOOKS_DEBUG=1` then restart Claude Code; the script will dump the latest stdin JSON to `${state_dir}/statusline.last_input.json`. |
 | "uninstall the project" | `/plugin uninstall audio-hooks@chanmeng-audio-hooks` (plugin) or `bash scripts/uninstall.sh --yes` (script install) |
 | "remove everything including config" | `bash scripts/uninstall.sh --yes --purge` |
 
@@ -317,6 +319,7 @@ After editing any canonical file in `/hooks/`, `/bin/`, `/audio/`, or `/config/`
 
 | Version | Date | Highlights |
 |---|---|---|
+| 5.1.3 | 2026-04-28 | **Status line clarity for `/model` switches.** Context segment now renders absolute counts alongside the percentage (e.g. `Context: 83% (166K/200K) 🛑 /compact`) so a sudden jump after switching from a 1M-context variant to a 200K window is self-explanatory rather than alarming. The numerator is derived from `used_percentage × context_window_size` (Claude Code's `total_input_tokens` field counts only literal input, not cache reads, so it understates real usage by 30× in cache-heavy sessions like Claude Code itself). New `CLAUDE_HOOKS_DEBUG=1` (or `true`/`yes`) behaviour: the status line script atomically dumps the latest stdin JSON to `${state_dir}/statusline.last_input.json` for diagnostics. New `tests/test_statusline.py` (25 cases) wired into the CI matrix — covers malformed JSON, missing fields, the `(X/Y)` math, `CLAUDE_HOOKS_DEBUG` toggle parity with `hook_runner`, and a regression guard against the pre-release bug where `total_input_tokens` was used as the numerator. |
 | 5.1.2 | 2026-04-20 | **Fix:** Windows playback truncated clips > 3 s because every PowerShell snippet in `play_audio_windows` and `play_audio_wsl` used a fixed `Start-Sleep -Seconds 3` (the default `permission-request.mp3` is ~3.4 s — the last ~0.4 s was cut off; `elicitation.mp3` at ~3.1 s was also affected) ([#14](https://github.com/ChanMeng666/claude-code-audio-hooks/issues/14)). All four snippets now poll `NaturalDuration.HasTimeSpan` (or `currentMedia.duration` for WMPlayer.OCX) and sleep for the real clip length + 500 ms tail buffer, falling back to 10 s only if the media never reports a duration. |
 | 5.1.1 | 2026-04-18 | **Critical fix:** `hook_runner.py` crashed on import with `NameError: name 'Tuple' is not defined`, blocking every `audio-hooks` subcommand on v5.0.3 and v5.1.0 ([#10](https://github.com/ChanMeng666/claude-code-audio-hooks/issues/10)). Adds CI import-smoke workflow (`.github/workflows/smoke.yml`) — 9-job matrix (Ubuntu/Windows/macOS × Python 3.9/3.12/3.13) plus plugin-in-sync check, runs on every push and PR. All version references realigned to `5.1.1` (v5.1.0 had shipped with in-tree strings still reading `5.0.3`). |
 | 5.1.0 | 2026-04-13 | **Context window monitor.** Status line gains real-time context usage tracking with colour-coded thresholds (🟢 <50% safe, 🟡 50-80% should `/compact`, 🔴 >80% agent perf degrades). 10 customisable segments (`model`, `version`, `sounds`, `webhook`, `theme`, `snooze`, `focus`, `branch`, `api_quota`, `context`) controlled via `statusline_settings.visible_segments`. |

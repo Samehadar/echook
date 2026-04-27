@@ -5,6 +5,30 @@ All notable changes to Claude Code Audio Hooks will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.1.3] - 2026-04-28
+
+Status line context segment now shows absolute token counts so the percentage stops being misleading after `/model` switches. Diagnostic JSON dump for the status line input. New unit-test suite wired into CI.
+
+### Fixed
+
+- **Status line context segment was opaque after `/model` switches between context-window variants** ([#16](https://github.com/ChanMeng666/claude-code-audio-hooks/issues/16), reported by [@ChanMeng666](https://github.com/ChanMeng666)). The percentage Claude Code calculates is `current_tokens / context_window_size`, so switching from a 1M-context variant (e.g. `claude-opus-4-7[1m]`) to a 200K window (e.g. default `claude-sonnet-4-6`) keeps your tokens the same but shrinks the denominator 5× — going from `Context: 17%` to `Context: 83%` (or, with more context, the reported `97%`) is **mathematically correct**, not a bug in either Claude Code or this project. But the status line gave no signal of the underlying numbers, leaving users to guess. The Context segment now appends absolute counts (e.g. `Context: 83% (166K/200K) 🛑 /compact`). The numerator is derived from `used_percentage × context_window_size` so it stays consistent with the percentage Claude Code computed; we explicitly do NOT use the `total_input_tokens` field from the status line JSON because in cache-heavy sessions like Claude Code itself it counts only literal input tokens (excluding `cache_read_input_tokens` / `cache_creation_input_tokens`) and is off by 30× in practice. When `context_window_size` is missing, malformed, or non-positive, the segment falls back silently to the pre-5.1.3 form `Context: 83%`.
+
+### Added
+
+- **`CLAUDE_HOOKS_DEBUG=1` (or `true`/`yes`, case-insensitive) now also dumps the status line stdin JSON** to `${state_dir}/statusline.last_input.json` via atomic temp-file rename. Used to diagnose what Claude Code is actually piping to the script (e.g. confirming whether `context_window_size` updated after a `/model` change). The truthy-value parsing matches `hook_runner.py` for consistency. The dump may include workspace paths, transcript path, and the last assistant message — a privacy note in `CLAUDE.md` instructs users to disable the env var when not actively diagnosing. Failures during dump are swallowed so diagnostics can never break status line rendering.
+- **`tests/test_statusline.py`** — 25 unit and integration tests, stdlib-only, wired into the existing `.github/workflows/smoke.yml` import-smoke matrix (Ubuntu / Windows / macOS × Python 3.9 / 3.12 / 3.13 = 9 jobs). Coverage:
+  - `_fmt_tokens` edge cases (0, sub-1K, exact 1K, exact 1M, fractional M)
+  - Robustness: empty stdin, malformed JSON, `null` `context_window`, string `used_percentage`, string / zero / negative `context_window_size` — none must crash
+  - Context segment correctness: the user's empirical 17%/83% scenario, red-threshold `/compact` hint, fallback when no `context_window_size`
+  - **Regression guard** that the script does NOT use `total_input_tokens` as the numerator (the bug surfaced and reverted during this release cycle)
+  - `CLAUDE_HOOKS_DEBUG` toggle parity with `hook_runner` (`1`/`true`/`yes` enable; `0`/`false`/`no`/anything else disable)
+  - Atomic-rename hygiene (no `.tmp` files left behind in the state dir)
+- **`CLAUDE.md` decision tree** gains entries for "context jumped to 83% / 97% after I switched models" (explains it is expected) and "diagnose what Claude Code is sending to the status line" (points at `CLAUDE_HOOKS_DEBUG`). The env-var table updates `CLAUDE_HOOKS_DEBUG` to mention both the NDJSON log and the status line dump, and adds the privacy note.
+
+### Changed
+
+- **`bin/audio-hooks-statusline.py:_maybe_dump_session`** uses an atomic write (`os.replace` of a per-PID tempfile) so concurrent status line invocations cannot leave a half-written `statusline.last_input.json`. The truthy parsing was tightened from strict `"1"` to `{1, true, yes}` (case-insensitive) to match `hook_runner.DEBUG`.
+
 ## [5.1.2] - 2026-04-20
 
 Windows audio-playback fix. Every default clip >= ~3.0 s was silently truncated on Windows and WSL because all four PowerShell snippets in `play_audio_windows` and `play_audio_wsl` used a **fixed** `Start-Sleep -Seconds 3` (4 s for WSL) before calling `$player.Stop(); $player.Close()`. The bundled `audio/default/permission-request.mp3` is ~3.4 s — users heard the last ~0.4 s cut off every time Claude Code asked for permission. `elicitation.mp3` (~3.1 s) was also clipped; `subagent-start.mp3` and `notification-urgent.mp3` were on the edge.

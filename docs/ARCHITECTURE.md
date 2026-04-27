@@ -207,11 +207,15 @@ Native matcher routing happens at the `settings.json` layer (Claude Code's match
 Two-line bottom bar registered in `~/.claude/settings.json` via `audio-hooks statusline install`. Reads stdin JSON Claude Code provides (model name, session_id, workspace.git_worktree, rate_limits, context_window) and emits two lines of plain text with ANSI colors:
 
 ```text
-[Opus] 🔊 Audio Hooks v5.1.2 | 6/26 Sounds | Webhook: ntfy | Theme: Voice
-[MUTED 23m]  🌿 feat/audio-v5  ████░░░░ API Quota: 78%  █████░░░ Context: 65% ⚠️ /compact
+[Opus] 🔊 Audio Hooks v5.1.3 | 6/26 Sounds | Webhook: ntfy | Theme: Voice
+[MUTED 23m]  🌿 feat/audio-v5  ████░░░░ API Quota: 78%  █████░░░ Context: 65% (130K/200K) ⚠️ /compact
 ```
 
 The API Quota bar uses thresholds GREEN <70%, YELLOW 70-89%, RED ≥90%. The Context bar uses agent-safety thresholds: GREEN <50% (safe), YELLOW 50-80% (should `/compact`), RED >80% (agent "dumb zone"). Actionable hints (`⚠️ /compact` or `🛑 /compact`) appear in yellow/red zones.
+
+**Context segment numerator (v5.1.3+).** When Claude Code's stdin JSON includes both `context_window.used_percentage` and `context_window.context_window_size`, the segment appends absolute counts via `_fmt_tokens()`, e.g. `Context: 83% (166K/200K)`. The numerator is **derived** as `int(round(used_percentage × context_window_size / 100))` — we deliberately do NOT use the `total_input_tokens` field from the JSON because it counts only literal input tokens (excluding `cache_read_input_tokens` / `cache_creation_input_tokens`), which understates real context usage by ~30× in cache-heavy sessions like Claude Code itself. Deriving from the percentage guarantees the displayed math is internally self-consistent. When `context_window_size` is missing, malformed, or non-positive, the segment falls back silently to the pre-5.1.3 form `Context: 83%`. Regression-guarded by `tests/test_statusline.py::TestContextSegment`.
+
+**Diagnostic dump (v5.1.3+).** Setting `CLAUDE_HOOKS_DEBUG=1` (or `true`/`yes`, case-insensitive — matches `hook_runner.DEBUG`) causes the script to atomically write the most recent stdin JSON to `${state_dir}/statusline.last_input.json` via per-PID tempfile + `os.replace`. Used to diagnose what Claude Code is actually piping (e.g. confirming whether `context_window_size` updated after a `/model` change). Privacy note: the dump may include workspace paths, transcript path, and the last assistant message — disable when not actively diagnosing.
 
 Users can customise which segments appear via `statusline_settings.visible_segments` (array of segment names). 10 segments available — Line 1: `model`, `version`, `sounds`, `webhook`, `theme`; Line 2: `snooze`, `focus`, `branch`, `api_quota`, `context`. Empty array (default) shows all. Example: `audio-hooks set statusline_settings.visible_segments '["context","api_quota"]'` shows only the two progress bars.
 
@@ -431,6 +435,9 @@ python bin/audio-hooks.py diagnose
 bash scripts/build-plugin.sh --check
 claude plugin validate plugins/audio-hooks
 
+# Run the unit-test suite (stdlib-only, no extra deps)
+python -m unittest discover tests
+
 # Verify a specific hook with mock stdin
 echo '{"session_id":"t","hook_event_name":"Stop","last_assistant_message":"test"}' | \
   python hooks/hook_runner.py stop
@@ -438,7 +445,13 @@ echo '{"session_id":"t","hook_event_name":"Stop","last_assistant_message":"test"
 # Test rate-limit alert
 echo '{"session_id":"t","rate_limits":{"five_hour":{"used_percentage":85,"resets_at":9999999999}}}' | \
   python hooks/hook_runner.py stop
+
+# Test the status line (Sonnet-after-/model-switch case)
+echo '{"session_id":"t","model":{"display_name":"Sonnet"},"context_window":{"used_percentage":83,"context_window_size":200000}}' | \
+  python bin/audio-hooks-statusline.py
 ```
+
+The `tests/` directory is wired into `.github/workflows/smoke.yml` and runs on every push/PR across the 9-job matrix (Ubuntu / Windows / macOS × Python 3.9 / 3.12 / 3.13). Adding new tests there is the canonical way to pin behavioural contracts.
 
 ## See also
 

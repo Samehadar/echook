@@ -31,7 +31,7 @@ from typing import Optional, Dict, Any, List, Tuple
 
 # Version used for auto-sync: when the installed copy in ~/.claude/hooks/
 # detects a newer version in the project directory, it self-updates.
-HOOK_RUNNER_VERSION = "5.1.2"
+HOOK_RUNNER_VERSION = "5.1.3"
 
 # =============================================================================
 # STRUCTURED LOGGING (NDJSON)

@@ -9,7 +9,7 @@ You type one slash command at install time. Then natural language forever.<br/>
 26 hook events, 2 audio themes, rate-limit alerts, webhooks, TTS, context monitor — all operated by Claude Code on your behalf.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-5.1.2-blue.svg)](https://github.com/ChanMeng666/claude-code-audio-hooks)
+[![Version](https://img.shields.io/badge/version-5.1.3-blue.svg)](https://github.com/ChanMeng666/claude-code-audio-hooks)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-green.svg)](https://github.com/ChanMeng666/claude-code-audio-hooks)
 [![Claude Code](https://img.shields.io/badge/Claude_Code-v2.1.80%2B-brightgreen.svg)](https://claude.ai/download)
 [![Plugin](https://img.shields.io/badge/install-just_talk_to_Claude-purple.svg)](#-install-in-60-seconds)
@@ -286,7 +286,7 @@ sequenceDiagram
     You->>CC: Show me the last 20 errors and clear the log.
     CC-->>You: 2 errors found (WEBHOOK_TIMEOUT). Log cleared.
     You->>CC: What version of audio-hooks am I running?
-    CC-->>You: v5.1.2, plugin install.
+    CC-->>You: v5.1.3, plugin install.
     You->>CC: Please uninstall audio-hooks completely.
     CC-->>You: Plugin uninstalled. All hooks removed.
     end
@@ -505,8 +505,8 @@ Real-time context window and API quota bars — color-coded warnings before Clau
 </p>
 
 ```text
-[Opus] Audio Hooks v5.1.2 | 6/26 Sounds | Webhook: ntfy | Theme: Voice
-[MUTED 23m]  feat/audio-v5  API Quota: 78%  Context: 65%  /compact
+[Opus] Audio Hooks v5.1.3 | 6/26 Sounds | Webhook: ntfy | Theme: Voice
+[MUTED 23m]  feat/audio-v5  API Quota: 78%  Context: 65% (130K/200K)  /compact
 ```
 
 | Color | Range | Meaning | Action |
@@ -514,6 +514,8 @@ Real-time context window and API quota bars — color-coded warnings before Clau
 | Green | < 50% | Safe — agent performs well | Keep working |
 | Yellow | 50-80% | Caution — entering the "dumb zone" | Type `/compact` or `/clear` |
 | Red | > 80% | Danger — agent makes frequent errors | Type `/compact` immediately |
+
+**Absolute counts (v5.1.3+).** When Claude Code reports the context window size, the segment also shows current/max tokens, e.g. `Context: 83% (166K/200K)`. This makes the math obvious when you `/model`-switch between context-window variants — switching from Opus 4.7 (1M) to Sonnet 4.6 (200K) keeps your tokens identical but shrinks the denominator 5×, so a sudden jump from `17%` to `83%` is **expected**, not a bug. See `docs/TROUBLESHOOTING.md#context-97-or-any-sudden-jump-right-after-switching-models` for the full explanation.
 
 <details>
 <summary><kbd>10 customisable segments</kbd></summary>

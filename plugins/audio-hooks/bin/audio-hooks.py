@@ -132,7 +132,7 @@ def require_project_root() -> int:
 # Project state — version, install detection, hook catalogue
 # ---------------------------------------------------------------------------
 
-PROJECT_VERSION = "5.1.2"
+PROJECT_VERSION = "5.1.3"
 
 # Canonical hook catalogue. Order matches CLAUDE.md and the install scripts.
 HOOK_CATALOG: List[Dict[str, Any]] = [
@@ -1379,7 +1379,7 @@ def _build_manifest() -> Dict[str, Any]:
             "CLAUDE_PLUGIN_ROOT": "Plugin install root (auto-set by Claude Code).",
             "CLAUDE_AUDIO_HOOKS_DATA": "Explicit override for state directory.",
             "CLAUDE_AUDIO_HOOKS_PROJECT": "Explicit override for project root.",
-            "CLAUDE_HOOKS_DEBUG": "Set to 1 to write debug-level events to the NDJSON log.",
+            "CLAUDE_HOOKS_DEBUG": "Set to 1/true/yes (case-insensitive) to write debug-level events to the NDJSON log AND dump the latest status line input JSON to ${state_dir}/statusline.last_input.json. Disable when not actively diagnosing — the dump may include workspace paths and the last assistant message.",
         },
     }
 

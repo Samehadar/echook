@@ -46,6 +46,11 @@ jobs:
         run: |
           python bin/audio-hooks.py test all
 
+      - name: Unit tests (statusline contract)
+        shell: bash
+        run: |
+          python -m unittest discover -v tests
+
   plugin-in-sync:
     runs-on: ubuntu-latest
     steps:

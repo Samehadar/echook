@@ -147,6 +147,44 @@ def _format_remaining(seconds: int) -> str:
     return f"{h}h{m}m" if m else f"{h}h"
 
 
+def _fmt_tokens(n: int) -> str:
+    """Render a token count as a compact human string (e.g. 194000 -> 194K)."""
+    if n >= 1_000_000:
+        if n % 1_000_000 == 0:
+            return f"{n // 1_000_000}M"
+        return f"{n / 1_000_000:.1f}M"
+    if n >= 1_000:
+        return f"{n // 1_000}K"
+    return str(n)
+
+
+def _maybe_dump_session(session: Dict[str, Any]) -> None:
+    """When CLAUDE_HOOKS_DEBUG is enabled, persist the latest session JSON for
+    inspection (used to diagnose status line input — e.g. context_window_size
+    after a /model switch).
+
+    Privacy note: the session payload contains workspace paths, transcript
+    location, and possibly the last assistant message. The file lives at
+    ``${state_dir}/statusline.last_input.json`` and is overwritten on each
+    invocation. Disable by unsetting the env var.
+
+    Truthy values match the hook_runner convention (``1``/``true``/``yes``,
+    case-insensitive). Atomic rename avoids leaving a half-written file when
+    a second invocation races the first. Failures are swallowed — diagnostics
+    must never break status line rendering.
+    """
+    if os.environ.get("CLAUDE_HOOKS_DEBUG", "").lower() not in ("1", "true", "yes"):
+        return
+    try:
+        d = _state_dir()
+        target = d / "statusline.last_input.json"
+        tmp = d / f"statusline.last_input.json.{os.getpid()}.tmp"
+        tmp.write_text(json.dumps(session, ensure_ascii=False), encoding="utf-8")
+        os.replace(tmp, target)
+    except (OSError, TypeError, ValueError):
+        pass
+
+
 def _bar(percent: float, width: int = 8) -> str:
     """Render a unicode progress bar with rate-limit color thresholds."""
     pct = max(0, min(100, int(percent)))
@@ -196,6 +234,7 @@ def _normalise_segments(raw: list) -> set:
 
 def main() -> int:
     session = _read_session_input()
+    _maybe_dump_session(session)
     session_id = str(session.get("session_id") or "default")
     model = (session.get("model") or {}).get("display_name", "Claude")
 
@@ -280,7 +319,19 @@ def main() -> int:
                     hint = f" {RED}\U0001f6d1 /compact{RESET}"
                 elif ctx_pct >= 50:
                     hint = f" {YELLOW}\u26a0\ufe0f /compact{RESET}"
-                parts.append(f"{_ctx_bar(ctx_pct)} Context: {int(ctx_pct)}%{hint}")
+                # Surface the window size so a surprising percentage (e.g. 97%
+                # after a /model switch from a 1M-context variant to a 200K
+                # window) shows what it is a percentage *of*. Derive the
+                # numerator from used_percentage × window_size — Claude Code's
+                # `total_input_tokens` field counts only literal input, not
+                # cache_read/cache_creation, so it understates real usage in
+                # cache-heavy sessions like Claude Code itself.
+                window_size = ctx_window.get("context_window_size")
+                tokens_str = ""
+                if isinstance(window_size, (int, float)) and window_size > 0:
+                    used_tokens = int(round(ctx_pct * window_size / 100.0))
+                    tokens_str = f" ({_fmt_tokens(used_tokens)}/{_fmt_tokens(int(window_size))})"
+                parts.append(f"{_ctx_bar(ctx_pct)} Context: {int(ctx_pct)}%{tokens_str}{hint}")
             except (TypeError, ValueError):
                 pass
 
