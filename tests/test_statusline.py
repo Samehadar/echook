@@ -72,10 +72,19 @@ def _run(
         input=stdin_payload,
         capture_output=True,
         text=True,
+        # Pin UTF-8 for both writing stdin and decoding stdout/stderr.
+        # On Windows runners the default is the system codepage (cp1252)
+        # which cannot decode the box-drawing chars and emoji the renderer
+        # emits — leaving subprocess.run to raise UnicodeDecodeError before
+        # our test even gets to assert anything. errors="replace" is
+        # belt-and-braces in case the script ever emits a sequence outside
+        # UTF-8 (it shouldn't, but tests must never crash silently).
+        encoding="utf-8",
+        errors="replace",
         env=env,
         timeout=15,
     )
-    return proc.returncode, proc.stdout, proc.stderr
+    return proc.returncode, proc.stdout or "", proc.stderr or ""
 
 
 # ---------------------------------------------------------------------------
