@@ -117,8 +117,39 @@ class TestFmtTokens(unittest.TestCase):
 
 
 class _StatuslineRenderBase(unittest.TestCase):
+    """Pre-populates the statusline cache file so ``_get_status()`` returns
+    immediately without spawning a nested ``audio-hooks status`` subprocess.
+
+    Why: the renderer tests assert specific stdout content. The renderer's
+    Line 1 short-circuits to "Audio Hooks (status unavailable)" when
+    ``_get_status()`` returns empty, which suppresses the Context segment.
+    On Windows GitHub Actions runners the nested subprocess chain
+    (test → statusline → audio-hooks status, all via Python) is flaky in a
+    way that doesn't reproduce locally and doesn't affect production (the
+    existing ``audio-hooks version / status / diagnose`` CI step on Windows
+    passes — the renderer's own subprocess call is what's flaky).
+
+    Pinning a cache file makes these tests cover the renderer in isolation.
+    The status backend has its own CI coverage.
+    """
+
+    _MINIMAL_STATUS = {
+        "version": "test",
+        "enabled_hook_count": 0,
+        "total_hook_count": 26,
+        "theme": "default",
+        "webhook": {"enabled": False, "format": "raw"},
+        "snooze": {"active": False},
+        "focus_flow": {"enabled": False, "mode": None},
+        "statusline": {"visible_segments": []},
+    }
+
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp(prefix="audio_hooks_tests_"))
+        for sid in ("t", "default"):
+            (self.tmp / f"statusline.cache.{sid}").write_text(
+                json.dumps(self._MINIMAL_STATUS), encoding="utf-8"
+            )
 
     def tearDown(self):
         shutil.rmtree(self.tmp, ignore_errors=True)
