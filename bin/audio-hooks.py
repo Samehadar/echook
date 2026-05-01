@@ -155,13 +155,13 @@ def require_project_root() -> int:
 # Project state — version, install detection, hook catalogue
 # ---------------------------------------------------------------------------
 
-PROJECT_VERSION = "5.1.4"
+PROJECT_VERSION = "5.1.5"
 
 # Canonical hook catalogue. Order matches CLAUDE.md and the install scripts.
 HOOK_CATALOG: List[Dict[str, Any]] = [
     {"name": "notification",         "default": True,  "audio": "notification-urgent.mp3",   "description": "Authorization or plan confirmation requested"},
     {"name": "stop",                 "default": True,  "audio": "task-complete.mp3",         "description": "Claude finished responding"},
-    {"name": "subagent_stop",        "default": True,  "audio": "subagent-complete.mp3",     "description": "Background subagent task done"},
+    {"name": "subagent_stop",        "default": False, "audio": "subagent-complete.mp3",     "description": "Background subagent task done"},
     {"name": "permission_request",   "default": True,  "audio": "permission-request.mp3",    "description": "Permission dialog appeared"},
     {"name": "session_start",        "default": False, "audio": "session-start.mp3",         "description": "Session began (matchers: startup|resume|clear|compact)"},
     {"name": "session_end",          "default": False, "audio": "session-end.mp3",           "description": "Session ended"},
@@ -182,10 +182,10 @@ HOOK_CATALOG: List[Dict[str, Any]] = [
     {"name": "elicitation",          "default": False, "audio": "elicitation.mp3",           "description": "MCP server requested user input"},
     {"name": "elicitation_result",   "default": False, "audio": "elicitation-result.mp3",    "description": "User responded to MCP elicitation"},
     # New in v5.0 (dedicated audio shipped in v5.0.1, generated via ElevenLabs).
-    {"name": "permission_denied",    "default": True,  "audio": "permission-denied.mp3",     "description": "Auto mode classifier denied a tool call (v5.0)"},
+    {"name": "permission_denied",    "default": False, "audio": "permission-denied.mp3",     "description": "Auto mode classifier denied a tool call (v5.0)"},
     {"name": "cwd_changed",          "default": False, "audio": "cwd-changed.mp3",           "description": "Working directory changed (v5.0)"},
     {"name": "file_changed",         "default": False, "audio": "file-changed.mp3",          "description": "Watched file changed on disk (v5.0)"},
-    {"name": "task_created",         "default": True,  "audio": "task-created.mp3",          "description": "Task created via TaskCreate (v5.0)"},
+    {"name": "task_created",         "default": False, "audio": "task-created.mp3",          "description": "Task created via TaskCreate (v5.0)"},
 ]
 
 

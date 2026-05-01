@@ -7,10 +7,10 @@
 **AI-operated audio notification system for Claude Code & Cursor IDE.**<br/>
 You type one slash command at install time. Then natural language forever.<br/>
 26 hook events, 2 audio themes, rate-limit alerts, webhooks, TTS, context monitor — all operated by Claude Code on your behalf.<br/>
-**🆕 5.1.4 — Cursor IDE compatibility.** When Cursor's built-in [third-party hooks bridge](https://cursor.com/docs/reference/third-party-hooks) calls our plugin, we now correctly read the user's *actual* preferences (theme, snooze, webhook) instead of falling back to bundled defaults. Use `audio-hooks install --cursor` for users who run Cursor without Claude Code. See [CHANGELOG](./CHANGELOG.md#514---2026-05-01) — **existing Cursor users must `/plugin uninstall` + `/plugin install` once to refresh the cached plugin code**.
+**🆕 5.1.5 — Painless upgrades.** Existing users never lose config across upgrades. New `audio-hooks upgrade` wraps `claude plugin update` / `uninstall + install` with `--keep-data` automatically; auto-migration preserves your settings when new keys are added in future versions; dual-location backups survive even rough `claude plugin uninstall`. Run it any time you want to refresh the plugin code Cursor's bridge invokes. See [CHANGELOG](./CHANGELOG.md#515---2026-05-01).
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-5.1.4-blue.svg)](https://github.com/ChanMeng666/claude-code-audio-hooks)
+[![Version](https://img.shields.io/badge/version-5.1.5-blue.svg)](https://github.com/ChanMeng666/claude-code-audio-hooks)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-green.svg)](https://github.com/ChanMeng666/claude-code-audio-hooks)
 [![Claude Code](https://img.shields.io/badge/Claude_Code-v2.1.80%2B-brightgreen.svg)](https://claude.ai/download)
 [![Plugin](https://img.shields.io/badge/install-just_talk_to_Claude-purple.svg)](#-install-in-60-seconds)

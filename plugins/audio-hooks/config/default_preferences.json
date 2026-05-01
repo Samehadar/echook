@@ -1,10 +1,10 @@
 {
   "$schema": "./user_preferences.schema.json",
-  "_comment": "Claude Code Audio Hooks - Default Configuration Template (v5.1.4)",
-  "_version": "5.1.4",
+  "_comment": "Claude Code Audio Hooks - Default Configuration Template (v5.1.5)",
+  "_version": "5.1.5",
   "_description": "This file is the default template for user_preferences.json. Plugin installs auto-copy this to ${CLAUDE_PLUGIN_DATA}/user_preferences.json on first read. AI agents should NOT edit this file directly — use 'audio-hooks set <key> <value>' instead.",
 
-  "version": "5.1.4",
+  "version": "5.1.5",
 
   "_comment_audio_theme": "Audio theme: 'default' for voice recordings, 'custom' for non-voice chimes. Change this one line to switch all audio.",
   "audio_theme": "default",
@@ -26,7 +26,7 @@
     "userpromptsubmit": false,
 
     "_comment_subagent_stop": "Plays when subagent tasks complete - RECOMMENDED for heavy users",
-    "subagent_stop": true,
+    "subagent_stop": false,
 
     "_comment_precompact": "Plays before conversation history compaction - OPTIONAL",
     "precompact": false,
@@ -77,7 +77,7 @@
     "elicitation_result": false,
 
     "_comment_permission_denied": "v5.0: Plays when auto mode classifier denies a tool call - RECOMMENDED",
-    "permission_denied": true,
+    "permission_denied": false,
 
     "_comment_cwd_changed": "v5.0: Plays when working directory changes - OPTIONAL (noisy)",
     "cwd_changed": false,
@@ -86,7 +86,7 @@
     "file_changed": false,
 
     "_comment_task_created": "v5.0: Plays when a task is created via TaskCreate - RECOMMENDED",
-    "task_created": true
+    "task_created": false
   },
 
   "playback_settings": {

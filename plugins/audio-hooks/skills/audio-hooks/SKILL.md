@@ -32,6 +32,27 @@ audio-hooks test all
 
 Duration syntax: `30m`, `1h`, `90s`, `2d`, or a bare integer (interpreted as minutes).
 
+**Upgrade the plugin without losing config**
+
+`audio-hooks upgrade` is the AI-first way to refresh the plugin code (and `~/.claude/plugins/cache/`) without touching the user's preferences. Use it whenever:
+
+| User says | Run |
+|---|---|
+| "upgrade audio-hooks" / "refresh the cache" / "Cursor still plays old theme" | `audio-hooks upgrade` |
+| "is there a new version?" | `audio-hooks upgrade --check-only` |
+| "the upgrade got stuck" | `audio-hooks upgrade --force` (only after confirming via `audio-hooks status`) |
+
+`upgrade` auto-detects scope via `claude plugin list --json`, tries `claude plugin update` first (data-preserving), falls back to `uninstall --keep-data + install` if needed. On success, the user's `~/.claude/plugins/data/audio-hooks-chanmeng-audio-hooks/user_preferences.json` is preserved verbatim, then loaded through auto-migration so new keys from the new template are merged in non-destructively.
+
+**Restore from a backup**
+
+| User says | Run |
+|---|---|
+| "what configurations have I changed?" | `audio-hooks status` (look at the `customizations` field) |
+| "show me available backups" | `audio-hooks backup list` |
+| "restore my config from before the upgrade" | `audio-hooks backup restore latest-external` |
+| "delete old backups" | `audio-hooks backup prune` |
+
 **Enable / disable individual hooks**
 
 Run `audio-hooks hooks list` to see all 26 hooks with their current state. Then:

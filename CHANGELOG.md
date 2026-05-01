@@ -5,6 +5,33 @@ All notable changes to Claude Code Audio Hooks will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.1.5] - 2026-05-01
+
+> **⚠️ For users who got bit by 5.1.4.** If your `audio_hooks` was reinitialised under 5.1.4 (e.g., via a `claude plugin uninstall` without `--keep-data`) and you now hear `subagent_stop` / `permission_denied` / `task_created` audio you didn't want, run: `audio-hooks hooks disable subagent_stop permission_denied task_created`. Migration logic from 5.1.5 forward will preserve your choice across all future upgrades.
+
+Painless upgrades. New `UserPreferences` class as single source of truth eliminates the dual-implementation bug class. `audio-hooks upgrade` wraps `claude plugin update`/`uninstall+install` with `--keep-data`. Auto-migration on load preserves user values when new keys are added in future versions. Dual-location backups (`~/.claude/plugins/data/<id>/user_preferences.json.bak` for last-good + `~/.claude-audio-hooks-backups/<id>/<ts>.json` for disaster recovery, rotation=20). New `audio-hooks backup list/show/restore/prune` subcommands. New `config/_defaults_baseline.json` + `tests/test_defaults_stability.py` enforce a no-default-flip policy at CI. The 5.1.4 default flips for `subagent_stop`, `permission_denied`, `task_created` are reverted to false.
+
+### Fixed
+
+- **Existing users no longer lose configuration on `claude plugin uninstall + install`** (the path 5.1.4 documented as "do this once to refresh the cache"). The new `audio-hooks upgrade` subcommand drives that flow with `--keep-data` automatically.
+- **Default value flips between versions are now CI-enforced policy violations.** `tests/test_defaults_stability.py` snapshots `config/default_preferences.json` into `config/_defaults_baseline.json`; flipping any existing scalar default fails the test until the baseline is also updated.
+- **5.1.4 default flips reverted.** `enabled_hooks.subagent_stop`, `enabled_hooks.permission_denied`, `enabled_hooks.task_created` go back to `false`. Existing users who explicitly set these to `true` in 5.1.4 are unaffected (migration preserves user values).
+
+### Added
+
+- **`hooks/user_preferences.py`** — single source of truth for user_preferences.json. ~350 lines. Owns path resolution (6-level chain), load with auto-migration, save with auto-backup, atomic writes guarded by cross-platform file lock, dual-location backup management, `diff_from_default()` for surfacing user customizations, lazy `get_prefs()` singleton.
+- **Auto-migration on load.** When `user_preferences.json` `_version` differs from the bundled template's, deep-merge missing keys without overwriting existing user values. Lists are atomic (user list wins entirely). Scalar-vs-container type mismatch resets to template default. `_version` and comment fields always overwrite from template. Migration is logged to NDJSON as `action: config_migrated` with `from_version`, `to_version`, `added_keys`, `backup_id`.
+- **Dual-location backups on save.** Every save snapshots the prior file content to `<data_dir>/user_preferences.json.bak` (last good, overwritten on each save) AND to `~/.claude-audio-hooks-backups/<plugin_id>/<ts>.json` (disaster recovery, kept outside `~/.claude/plugins/data/` so `claude plugin uninstall` cannot wipe it). Rotation: keep 20 most recent. Dedup: skip backup when content is byte-identical to the latest. Atomic write via `os.replace()`. Cross-platform file lock (`fcntl.flock` POSIX, `msvcrt.locking` Windows) on `<data_dir>/.user_prefs.lock` prevents concurrent saves from racing.
+- **`audio-hooks upgrade [--check-only] [--force]`** — JSON CLI verb that replaces the manual "uninstall + install" two-step. Detects scope via `claude plugin list --json`. Tries `claude plugin update` first; falls back to `uninstall --keep-data + install`. Crash-mid-upgrade leaves a marker at `~/.claude-audio-hooks-backups/.upgrade_in_progress.json` with full recovery instructions. On success, calls `prefs.load()` to trigger automatic migration.
+- **`audio-hooks backup list / show / restore / prune`** — JSON-emitting backup management. `restore` itself stamps a backup of the current state before overwriting (so a wrong restore is reversible). Magic IDs: `latest`, `latest-sibling`, `latest-external`, plus exact ISO timestamp for external backups.
+- **`status` / `manifest` output extensions.** New `customizations` block (output of `prefs.diff_from_default()`) shows only the keys where the user differs from defaults. New `last_migration` block (latest `config_migrated` NDJSON event, if any).
+- **New stable error codes.** `BACKUP_FAILED`, `BACKUP_NOT_FOUND`, `RESTORE_FAILED`, `LOCK_TIMEOUT`, `NOT_INSTALLED`, `UPGRADE_UNINSTALL_FAILED`, `UPGRADE_REINSTALL_FAILED`, `UPGRADE_VERIFY_FAILED`, `PRIOR_UPGRADE_INCOMPLETE`. Each carries a `hint` and `suggested_command` so AI can self-recover.
+- **40+ new unit tests** in `tests/test_user_preferences.py`, `tests/test_migration.py`, `tests/test_backups.py`, `tests/test_backup_cli.py`, `tests/test_upgrade_command.py`, `tests/test_defaults_stability.py`. All stdlib-only.
+
+### Refactored
+
+- `hooks/hook_runner.py` and `bin/audio-hooks.py` consolidated onto `UserPreferences`. Deleted ~200 lines of duplicated helpers (`_resolve_plugin_data_dir`, `_is_running_from_plugin`, `_auto_init_user_prefs`, `_apply_plugin_option_overlay`, plus the diverged `_resolve_config_file`/`_config_path` pair). Module-level globals (`CONFIG_FILE`, `QUEUE_DIR`) removed; consumers now call `_prefs().config_path` etc. This eliminates the dual-implementation bug class that caused 5.1.4 to need a follow-up patch.
+
 ## [5.1.4] - 2026-05-01
 
 > **⚠️ Cursor users — read this first.** If you have audio-hooks installed in Claude Code, Cursor IDE 3.2.16+ already auto-bridges this project's hooks (per [cursor.com/docs/reference/third-party-hooks](https://cursor.com/docs/reference/third-party-hooks)) — Cursor's *"Cursor Hooks Service"* loads `~/.claude/plugins/installed_plugins.json` on startup and calls our hook scripts on its own session events. This means **even if you uninstalled and reinstalled Claude Code's audio-hooks**, Cursor was probably still calling the *old cached* version of `runner/run.py`. To pick up the 5.1.4 fix, run inside Claude Code: `/plugin uninstall audio-hooks@chanmeng-audio-hooks` then `/plugin install audio-hooks@chanmeng-audio-hooks`. That refreshes `~/.claude/plugins/cache/chanmeng-audio-hooks/audio-hooks/<ver>/` to the new code Cursor will then bridge.

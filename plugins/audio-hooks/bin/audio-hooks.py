@@ -24,6 +24,7 @@ import json
 import os
 import platform
 import re
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -86,6 +87,28 @@ def _import_hook_runner():
 HR = _import_hook_runner()
 
 
+# Import UserPreferences from hooks/. Path is already on sys.path if HR
+# imported successfully; we still re-add defensively so the module loads
+# even when the runner import failed (e.g. partial install).
+if PROJECT_ROOT is not None:
+    hooks_dir = PROJECT_ROOT / "hooks"
+    if str(hooks_dir) not in sys.path:
+        sys.path.insert(0, str(hooks_dir))
+try:
+    from user_preferences import UserPreferences, get_prefs  # type: ignore
+except ImportError:
+    UserPreferences = None  # type: ignore
+    def get_prefs(*_a, **_k):  # type: ignore
+        raise RuntimeError(
+            "user_preferences module unavailable; reinstall the project"
+        )
+
+
+def _prefs():
+    """Return the process-wide UserPreferences singleton anchored at PROJECT_ROOT."""
+    return get_prefs(PROJECT_ROOT)
+
+
 # ---------------------------------------------------------------------------
 # JSON output helpers
 # ---------------------------------------------------------------------------
@@ -132,13 +155,13 @@ def require_project_root() -> int:
 # Project state — version, install detection, hook catalogue
 # ---------------------------------------------------------------------------
 
-PROJECT_VERSION = "5.1.4"
+PROJECT_VERSION = "5.1.5"
 
 # Canonical hook catalogue. Order matches CLAUDE.md and the install scripts.
 HOOK_CATALOG: List[Dict[str, Any]] = [
     {"name": "notification",         "default": True,  "audio": "notification-urgent.mp3",   "description": "Authorization or plan confirmation requested"},
     {"name": "stop",                 "default": True,  "audio": "task-complete.mp3",         "description": "Claude finished responding"},
-    {"name": "subagent_stop",        "default": True,  "audio": "subagent-complete.mp3",     "description": "Background subagent task done"},
+    {"name": "subagent_stop",        "default": False, "audio": "subagent-complete.mp3",     "description": "Background subagent task done"},
     {"name": "permission_request",   "default": True,  "audio": "permission-request.mp3",    "description": "Permission dialog appeared"},
     {"name": "session_start",        "default": False, "audio": "session-start.mp3",         "description": "Session began (matchers: startup|resume|clear|compact)"},
     {"name": "session_end",          "default": False, "audio": "session-end.mp3",           "description": "Session ended"},
@@ -159,10 +182,10 @@ HOOK_CATALOG: List[Dict[str, Any]] = [
     {"name": "elicitation",          "default": False, "audio": "elicitation.mp3",           "description": "MCP server requested user input"},
     {"name": "elicitation_result",   "default": False, "audio": "elicitation-result.mp3",    "description": "User responded to MCP elicitation"},
     # New in v5.0 (dedicated audio shipped in v5.0.1, generated via ElevenLabs).
-    {"name": "permission_denied",    "default": True,  "audio": "permission-denied.mp3",     "description": "Auto mode classifier denied a tool call (v5.0)"},
+    {"name": "permission_denied",    "default": False, "audio": "permission-denied.mp3",     "description": "Auto mode classifier denied a tool call (v5.0)"},
     {"name": "cwd_changed",          "default": False, "audio": "cwd-changed.mp3",           "description": "Working directory changed (v5.0)"},
     {"name": "file_changed",         "default": False, "audio": "file-changed.mp3",          "description": "Watched file changed on disk (v5.0)"},
-    {"name": "task_created",         "default": True,  "audio": "task-created.mp3",          "description": "Task created via TaskCreate (v5.0)"},
+    {"name": "task_created",         "default": False, "audio": "task-created.mp3",          "description": "Task created via TaskCreate (v5.0)"},
 ]
 
 
@@ -306,142 +329,34 @@ def _redact_url(url: str) -> str:
     return out
 
 
-def _is_running_from_plugin() -> bool:
-    """True if this CLI is invoked from a plugin install context."""
-    if os.environ.get("CLAUDE_PLUGIN_DATA"):
-        return True
-    try:
-        here = Path(__file__).resolve()
-        # bin/audio-hooks.py -> plugin root is parent.parent
-        plugin_root = here.parent.parent
-        if (plugin_root / ".claude-plugin" / "plugin.json").exists():
-            return True
-    except Exception:
-        pass
-    return False
-
-
-def _resolve_plugin_data_dir() -> Path:
-    """Compute the plugin data dir even when CLAUDE_PLUGIN_DATA isn't set."""
-    home = Path.home()
-    data_root = home / ".claude" / "plugins" / "data"
-    canonical = data_root / "audio-hooks-chanmeng-audio-hooks"
-    if canonical.exists():
-        return canonical
-    if data_root.exists():
-        try:
-            for child in data_root.iterdir():
-                if child.is_dir() and "audio-hooks" in child.name:
-                    return child
-        except OSError:
-            pass
-    return canonical
-
-
-def _auto_init_user_prefs(target: Path) -> None:
-    """Copy default_preferences.json into target if target doesn't exist."""
-    if target.exists():
-        return
-    try:
-        target.parent.mkdir(parents=True, exist_ok=True)
-        template = PROJECT_ROOT / "config" / "default_preferences.json"
-        if template.exists():
-            import shutil as _sh
-            _sh.copy2(str(template), str(target))
-    except OSError:
-        pass
-
-
 def _config_path() -> Path:
-    """Resolve user_preferences.json path.
+    """Backwards-compatible thin wrapper around UserPreferences.config_path.
 
-    Resolution order (mirrors hook_runner._resolve_config_file so the CLI
-    writes to the same file the runtime reads):
-      1. CLAUDE_PLUGIN_DATA env var (hook fire context).
-      2. CLAUDE_AUDIO_HOOKS_DATA explicit override.
-      3. Plugin context detected from script path (CLI via plugin bin/).
-      4. Shared Claude Code plugin data dir if user_preferences.json exists
-         there (catches "user runs `audio-hooks ...` from project source but
-         their actual prefs live in ~/.claude/plugins/data/...").
-      5. Cursor-native install dir if user_preferences.json exists there.
-      6. Legacy <project_dir>/config/user_preferences.json (script install).
-
-    Plugin / shared / Cursor-native contexts auto-init from
-    default_preferences.json on first read.
+    Path resolution (CLAUDE_PLUGIN_DATA → CLAUDE_AUDIO_HOOKS_DATA → plugin
+    cache → shared Claude Code dir → Cursor-native → legacy temp) lives in
+    :class:`UserPreferences`. New code should call ``_prefs().config_path``.
     """
-    plugin_data = os.environ.get("CLAUDE_PLUGIN_DATA")
-    if plugin_data:
-        target = Path(plugin_data) / "user_preferences.json"
-        _auto_init_user_prefs(target)
-        return target
-
-    explicit = os.environ.get("CLAUDE_AUDIO_HOOKS_DATA")
-    if explicit:
-        target = Path(explicit) / "user_preferences.json"
-        _auto_init_user_prefs(target)
-        return target
-
-    if _is_running_from_plugin():
-        target = _resolve_plugin_data_dir() / "user_preferences.json"
-        _auto_init_user_prefs(target)
-        return target
-
-    home = Path.home()
-    shared = home / ".claude" / "plugins" / "data" / "audio-hooks-chanmeng-audio-hooks"
-    if (shared / "user_preferences.json").exists():
-        return shared / "user_preferences.json"
-
-    cursor_native = home / ".cursor" / "audio-hooks-data"
-    if (cursor_native / "user_preferences.json").exists():
-        return cursor_native / "user_preferences.json"
-
-    return PROJECT_ROOT / "config" / "user_preferences.json"
-
-
-def _apply_plugin_option_overlay(config: Dict[str, Any]) -> Dict[str, Any]:
-    """Overlay CLAUDE_PLUGIN_OPTION_* env vars onto the loaded config (v5.0.1).
-
-    Mirrors hook_runner._apply_plugin_option_overlay so the CLI sees the same
-    effective config as the hook runner. The plugin manifest declares
-    userConfig keys; Claude Code exposes them via CLAUDE_PLUGIN_OPTION_<KEY>.
-    """
-    overlays = {
-        "CLAUDE_PLUGIN_OPTION_AUDIO_THEME":   ("audio_theme", str),
-        "CLAUDE_PLUGIN_OPTION_WEBHOOK_URL":   ("webhook_settings.url", str),
-        "CLAUDE_PLUGIN_OPTION_WEBHOOK_FORMAT": ("webhook_settings.format", str),
-        "CLAUDE_PLUGIN_OPTION_TTS_ENABLED":   ("tts_settings.enabled", lambda v: v.lower() in ("1", "true", "yes")),
-    }
-    for env_var, (dotted_key, coerce) in overlays.items():
-        raw = os.environ.get(env_var, "").strip()
-        if not raw:
-            continue
-        try:
-            value = coerce(raw)
-        except (TypeError, ValueError):
-            continue
-        _set_dotted(config, dotted_key, value)
-        if env_var == "CLAUDE_PLUGIN_OPTION_WEBHOOK_URL" and value:
-            config.setdefault("webhook_settings", {})["enabled"] = True
-    return config
+    return _prefs().config_path
 
 
 def _load_config_raw() -> Dict[str, Any]:
-    cp = _config_path()
-    if not cp.exists():
-        return _apply_plugin_option_overlay({})
+    """Load user_preferences.json (auto-init from template + plugin-option overlay)."""
+    if PROJECT_ROOT is None:
+        return {}
     try:
-        return _apply_plugin_option_overlay(json.loads(cp.read_text(encoding="utf-8")))
-    except json.JSONDecodeError:
-        return _apply_plugin_option_overlay({})
+        return _prefs().load()
+    except Exception:
+        return {}
 
 
 def _save_config_raw(cfg: Dict[str, Any]) -> Tuple[bool, str]:
-    cp = _config_path()
+    """Save user_preferences.json (atomic write + auto-backup snapshot)."""
+    if PROJECT_ROOT is None:
+        return False, "PROJECT_ROOT not detected"
     try:
-        cp.parent.mkdir(parents=True, exist_ok=True)
-        cp.write_text(json.dumps(cfg, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        _prefs().save(cfg)
         return True, ""
-    except OSError as e:
+    except Exception as e:
         return False, str(e)
 
 
@@ -485,8 +400,11 @@ def _coerce_value(raw: str) -> Any:
 # ---------------------------------------------------------------------------
 
 def _queue_dir() -> Path:
-    if HR is not None:
-        return HR.QUEUE_DIR
+    if PROJECT_ROOT is not None:
+        try:
+            return _prefs().queue_dir
+        except Exception:
+            pass
     return Path("/tmp/claude_audio_hooks_queue")
 
 
@@ -569,6 +487,12 @@ def cmd_status(_args: List[str]) -> int:
 
     enabled = [h["name"] for h in HOOK_CATALOG if is_on(h["name"], h["default"])]
 
+    customizations: Dict[str, Any] = {}
+    try:
+        customizations = _prefs().diff_from_default()
+    except Exception:
+        pass
+
     webhook = cfg.get("webhook_settings", {}) or {}
     tts = cfg.get("tts_settings", {}) or {}
     focus = cfg.get("focus_flow", {}) or {}
@@ -576,10 +500,18 @@ def cmd_status(_args: List[str]) -> int:
     sl = cfg.get("statusline_settings", {}) or {}
     install = _detect_install_mode()
 
-    # Resolve the effective plugin data dir even when CLAUDE_PLUGIN_DATA isn't set
+    # Resolve the effective plugin data dir even when CLAUDE_PLUGIN_DATA isn't set.
+    # When this CLI binary lives inside a plugin layout (parent.parent has
+    # `.claude-plugin/plugin.json`), surface the plugin's shared data dir so
+    # `audio-hooks status` reports the same path the runtime reads.
     plugin_data_dir = os.environ.get("CLAUDE_PLUGIN_DATA")
-    if not plugin_data_dir and _is_running_from_plugin():
-        plugin_data_dir = str(_resolve_plugin_data_dir())
+    if not plugin_data_dir and UserPreferences is not None and PROJECT_ROOT is not None:
+        cli_script = Path(__file__).resolve()
+        cli_plugin_marker = cli_script.parent.parent / ".claude-plugin" / "plugin.json"
+        if cli_plugin_marker.exists():
+            plugin_data_dir = str(
+                UserPreferences(PROJECT_ROOT, script_path=cli_script)._plugin_cache_data_dir()
+            )
 
     emit({
         "ok": True,
@@ -616,6 +548,7 @@ def cmd_status(_args: List[str]) -> int:
         "statusline": {
             "visible_segments": sl.get("visible_segments", []),
         },
+        "customizations": customizations,
     })
     return 0
 
@@ -1555,6 +1488,288 @@ def cmd_update(args: List[str]) -> int:
 
 
 # ---------------------------------------------------------------------------
+# Subcommand: backup (list / show / restore / prune)
+# ---------------------------------------------------------------------------
+
+def cmd_backup(args: List[str]) -> int:
+    if require_project_root() != 0:
+        return 1
+    if not args:
+        return emit_error(
+            "INVALID_USAGE",
+            "Usage: audio-hooks backup <list|show|restore|prune>",
+            suggested_command="audio-hooks manifest",
+        )
+    sub = args[0]
+    rest = args[1:]
+    prefs = _prefs()
+    if sub == "list":
+        try:
+            entries = prefs.list_backups()
+        except Exception as e:
+            return emit_error("INTERNAL_ERROR", str(e))
+        emit({
+            "ok": True,
+            "backups": entries,
+            "count": len(entries),
+            "external_dir": str(prefs.external_backup_dir),
+            "sibling_path": str(prefs.sibling_backup_path),
+        })
+        return 0
+    if sub == "show":
+        if not rest:
+            return emit_error("INVALID_USAGE", "Usage: audio-hooks backup show <id>")
+        backup_id = rest[0]
+        try:
+            entries = prefs.list_backups()
+        except Exception as e:
+            return emit_error("INTERNAL_ERROR", str(e))
+        match = next((e for e in entries if e["id"] == backup_id), None)
+        if match is None:
+            return emit_error(
+                "BACKUP_NOT_FOUND",
+                f"No backup with id={backup_id}",
+                suggested_command="audio-hooks backup list",
+            )
+        try:
+            content = json.loads(Path(match["path"]).read_text(encoding="utf-8"))
+        except (OSError, ValueError) as e:
+            return emit_error(
+                "RESTORE_FAILED",
+                f"Backup unreadable: {e}",
+                suggested_command="audio-hooks backup list",
+            )
+        emit({
+            "ok": True,
+            "id": backup_id,
+            "location": match["location"],
+            "from_version": match.get("from_version"),
+            "content": content,
+        })
+        return 0
+    if sub == "restore":
+        if not rest:
+            return emit_error(
+                "INVALID_USAGE",
+                "Usage: audio-hooks backup restore <id|latest|latest-sibling|latest-external>",
+            )
+        backup_id = rest[0]
+        try:
+            restored = prefs.restore_from(backup_id)
+        except FileNotFoundError as e:
+            return emit_error(
+                "BACKUP_NOT_FOUND",
+                str(e),
+                suggested_command="audio-hooks backup list",
+            )
+        except ValueError as e:
+            return emit_error(
+                "RESTORE_FAILED",
+                str(e),
+                suggested_command="audio-hooks backup list",
+            )
+        emit({
+            "ok": True,
+            "restored_from": backup_id,
+            "audio_theme": restored.get("audio_theme"),
+            "version": restored.get("_version"),
+        })
+        return 0
+    if sub == "prune":
+        try:
+            removed = prefs.prune_backups()
+        except Exception as e:
+            return emit_error("INTERNAL_ERROR", str(e))
+        emit({
+            "ok": True,
+            "removed": removed,
+            "kept_max": prefs.EXTERNAL_BACKUP_KEEP,
+        })
+        return 0
+    return emit_error(
+        "INVALID_USAGE",
+        f"Unknown backup subcommand: {sub}",
+        suggested_command="audio-hooks backup list",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Subcommand: upgrade (refresh the plugin code without losing config)
+# ---------------------------------------------------------------------------
+
+def cmd_upgrade(args: List[str]) -> int:
+    if require_project_root() != 0:
+        return 1
+    check_only = "--check-only" in args
+    force = "--force" in args
+    PLUGIN_ID = "audio-hooks@chanmeng-audio-hooks"
+
+    # Resolve the `claude` executable explicitly. subprocess on Windows
+    # without shell=True only finds .exe files for bare names — using
+    # shutil.which lets us also locate .cmd/.bat shims (used by tests
+    # and by some installer flavors).
+    import shutil
+    claude_exe = shutil.which("claude")
+    if not claude_exe:
+        return emit_error(
+            "INTERNAL_ERROR",
+            "`claude` CLI not on PATH; cannot upgrade",
+            suggested_command="install Claude Code first",
+        )
+
+    # 1. Detect current install state via claude plugin list --json
+    try:
+        proc = subprocess.run(
+            [claude_exe, "plugin", "list", "--json"],
+            capture_output=True, text=True, encoding="utf-8", timeout=30,
+        )
+    except FileNotFoundError:
+        return emit_error(
+            "INTERNAL_ERROR",
+            "`claude` CLI not on PATH; cannot upgrade",
+            suggested_command="install Claude Code first",
+        )
+    if proc.returncode != 0:
+        return emit_error(
+            "INTERNAL_ERROR",
+            f"`claude plugin list` failed: {proc.stderr.strip()}",
+        )
+    try:
+        plugins = json.loads(proc.stdout)
+    except json.JSONDecodeError as e:
+        return emit_error("INTERNAL_ERROR", f"Cannot parse plugin list: {e}")
+
+    entry = next((p for p in plugins if p.get("id") == PLUGIN_ID), None)
+    if entry is None:
+        return emit_error(
+            "NOT_INSTALLED",
+            f"{PLUGIN_ID} is not installed in any scope",
+            suggested_command="audio-hooks install --plugin",
+        )
+
+    current_scope = entry.get("scope", "user")
+    current_version = entry.get("version", "unknown")
+
+    # 2. --check-only path
+    if check_only:
+        emit({
+            "ok": True,
+            "current_version": current_version,
+            "scope": current_scope,
+            "would_upgrade": current_version != PROJECT_VERSION,
+            "target_version": PROJECT_VERSION,
+        })
+        return 0
+
+    # 3. Marker
+    marker_dir = Path.home() / ".claude-audio-hooks-backups"
+    marker_dir.mkdir(parents=True, exist_ok=True)
+    marker = marker_dir / ".upgrade_in_progress.json"
+    if marker.exists() and not force:
+        try:
+            existing = json.loads(marker.read_text(encoding="utf-8"))
+            return emit_error(
+                "PRIOR_UPGRADE_INCOMPLETE",
+                "A previous upgrade did not complete; investigate before retrying",
+                suggested_command="audio-hooks status",
+                previous=existing,
+            )
+        except (OSError, ValueError):
+            pass
+    marker.write_text(json.dumps({
+        "started_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "from_version": current_version,
+        "scope": current_scope,
+        "recovery_command": f"python {PROJECT_ROOT}/bin/audio-hooks.py upgrade --force",
+    }, indent=2), encoding="utf-8")
+
+    # 4. Try `claude plugin update` first (data-preserving)
+    update_proc = subprocess.run(
+        [claude_exe, "plugin", "update", PLUGIN_ID, "--scope", current_scope],
+        capture_output=True, text=True, encoding="utf-8", timeout=120,
+    )
+    used_path = "update"
+    if update_proc.returncode != 0:
+        # 5. Fallback: uninstall --keep-data + install
+        uninstall_proc = subprocess.run(
+            [claude_exe, "plugin", "uninstall", PLUGIN_ID, "--keep-data",
+             "--scope", current_scope, "-y"],
+            capture_output=True, text=True, encoding="utf-8", timeout=60,
+        )
+        if uninstall_proc.returncode != 0:
+            return emit_error(
+                "UPGRADE_UNINSTALL_FAILED",
+                uninstall_proc.stderr.strip() or "uninstall failed",
+                suggested_command=f"claude plugin uninstall {PLUGIN_ID} --keep-data --scope {current_scope}",
+            )
+        install_proc = subprocess.run(
+            [claude_exe, "plugin", "install", PLUGIN_ID, "--scope", current_scope],
+            capture_output=True, text=True, encoding="utf-8", timeout=120,
+        )
+        if install_proc.returncode != 0:
+            return emit_error(
+                "UPGRADE_REINSTALL_FAILED",
+                install_proc.stderr.strip() or "install failed",
+                suggested_command=f"claude plugin install {PLUGIN_ID} --scope {current_scope}",
+            )
+        used_path = "uninstall+install"
+
+    # 6. Verify
+    verify_proc = subprocess.run(
+        [claude_exe, "plugin", "list", "--json"],
+        capture_output=True, text=True, encoding="utf-8", timeout=30,
+    )
+    if verify_proc.returncode != 0:
+        # Upgrade itself succeeded; we just couldn't verify. Delete the
+        # marker so future runs aren't misleadingly blocked.
+        try:
+            marker.unlink()
+        except OSError:
+            pass
+        return emit_error(
+            "UPGRADE_VERIFY_FAILED",
+            "Upgrade completed but post-upgrade `claude plugin list` failed; run `audio-hooks upgrade --check-only` to confirm new version.",
+            upgrade_may_have_completed=True,
+            via=used_path,
+        )
+    try:
+        new_plugins = json.loads(verify_proc.stdout)
+    except json.JSONDecodeError:
+        new_plugins = []
+    new_entry = next((p for p in new_plugins if p.get("id") == PLUGIN_ID), None)
+    new_version = new_entry["version"] if new_entry else "unknown"
+
+    # 7. Delete marker
+    try:
+        marker.unlink()
+    except OSError:
+        pass
+
+    # 8. Trigger migration
+    migration_info: Dict[str, Any] = {}
+    try:
+        from user_preferences import _reset_prefs  # type: ignore
+        # Reset cache so next load picks up post-upgrade paths
+        _reset_prefs()
+        prefs = _prefs()
+        cfg = prefs.load()
+        migration_info = {"current_version": cfg.get("_version")}
+    except Exception as e:
+        migration_info = {"warning": f"migration_skipped: {e}"}
+
+    emit({
+        "ok": True,
+        "from_version": current_version,
+        "to_version": new_version,
+        "scope": current_scope,
+        "data_preserved": True,
+        "via": used_path,
+        "config": migration_info,
+    })
+    return 0
+
+
+# ---------------------------------------------------------------------------
 # Subcommand: manifest (the keystone)
 # ---------------------------------------------------------------------------
 
@@ -1679,6 +1894,11 @@ def _build_manifest() -> Dict[str, Any]:
             {"name": "install", "args": ["[--plugin|--scripts|--cursor]", "[--force]"], "description": "Install non-interactively. --cursor writes ~/.cursor/hooks.json for Cursor IDE users (5.1.4+). --force overrides DUPLICATE_BRIDGE check."},
             {"name": "uninstall", "args": ["[--plugin|--scripts|--cursor]", "[--purge]"], "description": "Uninstall non-interactively. --cursor removes audio-hooks-managed entries from ~/.cursor/hooks.json (--purge also removes ~/.cursor/audio-hooks-data/)."},
             {"name": "update", "args": ["[--check]"], "description": "Show current version (real updates go through /plugin update)"},
+            {"name": "upgrade", "args": ["[--check-only]", "[--force]"], "description": "Refresh the plugin code (and ~/.claude/plugins/cache/) without losing config. Tries `claude plugin update` first; falls back to uninstall --keep-data + install."},
+            {"name": "backup list", "args": [], "description": "JSON array of available backups, newest first"},
+            {"name": "backup show", "args": ["<id>"], "description": "Print full content of one backup"},
+            {"name": "backup restore", "args": ["<id|latest|latest-sibling|latest-external>"], "description": "Restore config from a backup; current state is itself backed up before overwrite"},
+            {"name": "backup prune", "args": [], "description": "Trim external backup dir to EXTERNAL_BACKUP_KEEP=20"},
         ],
         "hooks": HOOK_CATALOG,
         "config_keys": [
@@ -1775,6 +1995,8 @@ DISPATCH = {
     "uninstall": cmd_uninstall,
     "update": cmd_update,
     "statusline": cmd_statusline,
+    "backup": cmd_backup,
+    "upgrade": cmd_upgrade,
 }
 
 

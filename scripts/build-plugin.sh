@@ -67,6 +67,7 @@ sync_dir() {
 
 # Canonical files
 sync_file "$REPO/hooks/hook_runner.py"             "$PLUGIN/hooks/hook_runner.py"
+sync_file "$REPO/hooks/user_preferences.py"        "$PLUGIN/hooks/user_preferences.py"
 sync_file "$REPO/bin/audio-hooks"                  "$PLUGIN/bin/audio-hooks"
 sync_file "$REPO/bin/audio-hooks.py"               "$PLUGIN/bin/audio-hooks.py"
 sync_file "$REPO/bin/audio-hooks.cmd"              "$PLUGIN/bin/audio-hooks.cmd"

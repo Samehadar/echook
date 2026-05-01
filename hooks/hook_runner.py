@@ -40,7 +40,7 @@ from user_preferences import UserPreferences, get_prefs  # type: ignore  # noqa:
 
 # Version used for auto-sync: when the installed copy in ~/.claude/hooks/
 # detects a newer version in the project directory, it self-updates.
-HOOK_RUNNER_VERSION = "5.1.4"
+HOOK_RUNNER_VERSION = "5.1.5"
 
 # =============================================================================
 # STRUCTURED LOGGING (NDJSON)
@@ -598,8 +598,7 @@ def is_hook_enabled(hook_type: str) -> bool:
     config = load_config()
 
     # Default enabled hooks (v5.0 adds permission_denied + task_created)
-    default_enabled = {"notification", "stop", "subagent_stop", "permission_request",
-                       "permission_denied", "task_created"}
+    default_enabled = {"notification", "stop", "permission_request"}
 
     enabled_hooks = config.get("enabled_hooks", {})
 

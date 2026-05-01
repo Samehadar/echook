@@ -62,7 +62,7 @@ class UserPreferences:
 
     PLUGIN_ID = "audio-hooks-chanmeng-audio-hooks"
     EXTERNAL_BACKUP_DIRNAME = ".claude-audio-hooks-backups"
-    EXTERNAL_BACKUP_KEEP = 10
+    EXTERNAL_BACKUP_KEEP = 20
 
     def __init__(self, project_dir: Path, *, script_path: Optional[Path] = None):
         ...
