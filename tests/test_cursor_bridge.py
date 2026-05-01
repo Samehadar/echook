@@ -185,6 +185,83 @@ class TestResolveDataDir(unittest.TestCase):
                 mod.Path.home = original_home
 
 
+class TestResolveConfigFileSharedFallback(unittest.TestCase):
+    """Regression: ``audio-hooks set`` invoked from the project source tree
+    must write to the same ``user_preferences.json`` the runtime reads.
+
+    The bug this guards: prior to 5.1.4, ``_resolve_config_file()`` only
+    checked the plugin-cache script-path heuristic. When a user ran
+    ``audio-hooks theme set custom`` from the project source tree, that
+    heuristic was False and the writer fell back to
+    ``<project>/config/user_preferences.json`` while the runtime kept reading
+    from ``~/.claude/plugins/data/audio-hooks-chanmeng-audio-hooks/...``.
+    Result: the user's setting silently never took effect.
+
+    The fix added an explicit shared-dir probe between the script-path
+    heuristic and the legacy fallback. This test pins that.
+    """
+
+    def setUp(self):
+        self._saved = {
+            k: os.environ.pop(k, None)
+            for k in ("CLAUDE_PLUGIN_DATA", "CLAUDE_AUDIO_HOOKS_DATA",
+                      "CLAUDE_PLUGIN_ROOT")
+        }
+
+    def tearDown(self):
+        for k, v in self._saved.items():
+            if v is not None:
+                os.environ[k] = v
+            else:
+                os.environ.pop(k, None)
+
+    def test_shared_path_is_chosen_when_user_prefs_exist_there(self):
+        with tempfile.TemporaryDirectory() as fake_home:
+            mod = _load_module()
+            shared_dir = (
+                mod.Path(fake_home)
+                / ".claude" / "plugins" / "data"
+                / "audio-hooks-chanmeng-audio-hooks"
+            )
+            shared_dir.mkdir(parents=True)
+            shared_prefs = shared_dir / "user_preferences.json"
+            shared_prefs.write_text(
+                '{"audio_theme": "custom"}', encoding="utf-8",
+            )
+            original_home = mod.Path.home
+            try:
+                mod.Path.home = staticmethod(lambda: mod.Path(fake_home))
+                resolved = mod._resolve_config_file()
+                self.assertEqual(
+                    resolved, shared_prefs,
+                    f"Resolver should pick the shared user_preferences.json "
+                    f"when it exists; got {resolved}",
+                )
+            finally:
+                mod.Path.home = original_home
+
+    def test_legacy_project_path_used_when_shared_absent(self):
+        # When the shared dir does NOT have user_preferences.json (fresh box,
+        # no Claude Code), we fall through to the legacy script-install path.
+        # We still get a Path back (the file may not exist yet on a clean
+        # install — auto_init handles that elsewhere).
+        with tempfile.TemporaryDirectory() as fake_home:
+            mod = _load_module()
+            original_home = mod.Path.home
+            try:
+                mod.Path.home = staticmethod(lambda: mod.Path(fake_home))
+                resolved = mod._resolve_config_file()
+                # Expect the project-source path (PROJECT_DIR/config/...)
+                self.assertTrue(
+                    str(resolved).endswith("user_preferences.json"),
+                    f"Expected a user_preferences.json path, got {resolved}",
+                )
+                # And specifically NOT inside the fake home (which has no shared dir)
+                self.assertNotIn(fake_home, str(resolved))
+            finally:
+                mod.Path.home = original_home
+
+
 class TestSessionStartEnvOutput(unittest.TestCase):
     """``session_start`` must emit ``{"env": {"CLAUDE_PLUGIN_DATA": ...}}`` to
     stdout when invoker == cursor, regardless of enabled_hooks setting.

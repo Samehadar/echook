@@ -355,17 +355,29 @@ def _auto_init_user_prefs(target: Path) -> None:
 def _config_path() -> Path:
     """Resolve user_preferences.json path.
 
-    Resolution order:
+    Resolution order (mirrors hook_runner._resolve_config_file so the CLI
+    writes to the same file the runtime reads):
       1. CLAUDE_PLUGIN_DATA env var (hook fire context).
-      2. Plugin context detected from script path (CLI via plugin bin/).
-      3. CLAUDE_AUDIO_HOOKS_DATA explicit override.
-      4. Legacy <project_dir>/config/user_preferences.json (script install).
+      2. CLAUDE_AUDIO_HOOKS_DATA explicit override.
+      3. Plugin context detected from script path (CLI via plugin bin/).
+      4. Shared Claude Code plugin data dir if user_preferences.json exists
+         there (catches "user runs `audio-hooks ...` from project source but
+         their actual prefs live in ~/.claude/plugins/data/...").
+      5. Cursor-native install dir if user_preferences.json exists there.
+      6. Legacy <project_dir>/config/user_preferences.json (script install).
 
-    Plugin contexts auto-init from default_preferences.json on first read.
+    Plugin / shared / Cursor-native contexts auto-init from
+    default_preferences.json on first read.
     """
     plugin_data = os.environ.get("CLAUDE_PLUGIN_DATA")
     if plugin_data:
         target = Path(plugin_data) / "user_preferences.json"
+        _auto_init_user_prefs(target)
+        return target
+
+    explicit = os.environ.get("CLAUDE_AUDIO_HOOKS_DATA")
+    if explicit:
+        target = Path(explicit) / "user_preferences.json"
         _auto_init_user_prefs(target)
         return target
 
@@ -374,9 +386,15 @@ def _config_path() -> Path:
         _auto_init_user_prefs(target)
         return target
 
-    explicit = os.environ.get("CLAUDE_AUDIO_HOOKS_DATA")
-    if explicit:
-        return Path(explicit) / "user_preferences.json"
+    home = Path.home()
+    shared = home / ".claude" / "plugins" / "data" / "audio-hooks-chanmeng-audio-hooks"
+    if (shared / "user_preferences.json").exists():
+        return shared / "user_preferences.json"
+
+    cursor_native = home / ".cursor" / "audio-hooks-data"
+    if (cursor_native / "user_preferences.json").exists():
+        return cursor_native / "user_preferences.json"
+
     return PROJECT_ROOT / "config" / "user_preferences.json"
 
 

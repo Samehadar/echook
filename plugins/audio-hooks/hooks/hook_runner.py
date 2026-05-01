@@ -604,18 +604,28 @@ def _auto_init_user_prefs(target: Path) -> None:
 def _resolve_config_file() -> Path:
     """Resolve user_preferences.json path.
 
-    Resolution order:
+    Resolution order (mirrors ``_resolve_data_dir`` so reads and writes always
+    target the same file regardless of how the runner is invoked):
       1. CLAUDE_PLUGIN_DATA env var (set by Claude Code in hook fire context)
       2. CLAUDE_AUDIO_HOOKS_DATA explicit override
       3. Plugin context detected from script path (CLI invocation via plugin bin/,
          OR Cursor's auto-bridge which invokes ``~/.claude/plugins/cache/.../hook_runner.py``
          WITHOUT setting CLAUDE_PLUGIN_DATA)
-      4. Cursor-native install: ``~/.cursor/audio-hooks-data/user_preferences.json``
+      4. **Shared Claude Code plugin data dir** —
+         ``~/.claude/plugins/data/audio-hooks-chanmeng-audio-hooks/user_preferences.json``
+         already exists. This catches the case where the user runs the
+         ``audio-hooks`` CLI from the project source tree (so the script-path
+         heuristic in step 3 is False) but their actual preferences live in
+         the shared plugin data dir. Without this branch, ``audio-hooks set``
+         from the project tree would silently write to a stranded
+         ``<project>/config/user_preferences.json`` while the runtime reads
+         from the shared dir.
+      5. Cursor-native install: ``~/.cursor/audio-hooks-data/user_preferences.json``
          already exists (created by ``audio-hooks install --cursor``)
-      5. Legacy <project_dir>/config/user_preferences.json (script install)
+      6. Legacy <project_dir>/config/user_preferences.json (script install)
 
-    For plugin / Cursor-native contexts, the file is auto-initialized from
-    default_preferences.json on first read.
+    For plugin / shared / Cursor-native contexts, the file is auto-initialized
+    from default_preferences.json on first read.
     """
     plugin_data = os.environ.get("CLAUDE_PLUGIN_DATA")
     if plugin_data:
@@ -634,7 +644,12 @@ def _resolve_config_file() -> Path:
         _auto_init_user_prefs(target)
         return target
 
-    cursor_native = Path.home() / ".cursor" / "audio-hooks-data"
+    home = Path.home()
+    shared = home / ".claude" / "plugins" / "data" / "audio-hooks-chanmeng-audio-hooks"
+    if (shared / "user_preferences.json").exists():
+        return shared / "user_preferences.json"
+
+    cursor_native = home / ".cursor" / "audio-hooks-data"
     if (cursor_native / "user_preferences.json").exists():
         return cursor_native / "user_preferences.json"
 
