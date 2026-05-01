@@ -6,8 +6,14 @@ our ``runner/run.py``, it does NOT inject ``CLAUDE_PLUGIN_DATA`` — instead
 it sets ``CURSOR_VERSION`` and a Cursor-specific stdin schema. This file
 pins the contract that:
 
-  1. ``_resolve_data_dir`` falls back through the documented priority chain
-     (env vars → shared Claude Code dir → Cursor-native dir → legacy temp).
+  1. ``UserPreferences._resolve_data_dir`` falls back through the documented
+     priority chain (env vars → shared Claude Code dir → Cursor-native dir
+     → legacy temp). Path resolution lives on the class as of 5.1.5; the
+     here-only smoke checks survive as integration coverage. Detailed unit
+     coverage of the priority chain — including the
+     ``test_shared_dir_used_when_user_prefs_exists_there`` regression that
+     guards the 5.1.4 anti-stranding fix — lives in
+     ``tests/test_user_preferences.py::TestPathResolution``.
   2. ``detect_invoker`` returns the right label based on env vars alone
      (more reliable than parsing stdin).
   3. The ``session_start`` handler emits ``{"env": {"CLAUDE_PLUGIN_DATA": ...}}``
@@ -134,14 +140,23 @@ class TestDetectInvoker(unittest.TestCase):
 
 
 class TestResolveDataDir(unittest.TestCase):
-    """``_resolve_data_dir`` priority chain.
+    """``UserPreferences._resolve_data_dir`` priority chain (smoke).
 
     Priority: CLAUDE_PLUGIN_DATA → CLAUDE_AUDIO_HOOKS_DATA → shared
     (~/.claude/plugins/data/audio-hooks-chanmeng-audio-hooks) →
     cursor-native (~/.cursor/audio-hooks-data) → legacy temp dir.
+
+    Detailed coverage lives in ``tests/test_user_preferences.py``; this
+    class kept three sanity checks here so the cursor-bridge file remains
+    a self-contained read for the 5.1.4 contract.
     """
 
     def setUp(self):
+        # Loading hook_runner makes sure hooks/ is on sys.path so that
+        # `from user_preferences import UserPreferences` resolves below.
+        _load_module()
+        from user_preferences import UserPreferences  # type: ignore  # noqa: WPS433
+        self._UserPreferences = UserPreferences
         self._saved = {
             k: os.environ.pop(k, None)
             for k in ("CLAUDE_PLUGIN_DATA", "CLAUDE_AUDIO_HOOKS_DATA")
@@ -154,112 +169,43 @@ class TestResolveDataDir(unittest.TestCase):
             else:
                 os.environ.pop(k, None)
 
+    def _prefs(self):
+        return self._UserPreferences(REPO)
+
     def test_claude_plugin_data_wins(self):
         with tempfile.TemporaryDirectory() as td:
             os.environ["CLAUDE_PLUGIN_DATA"] = td
-            mod = _load_module()
-            self.assertEqual(str(mod._resolve_data_dir()), td)
+            self.assertEqual(str(self._prefs()._resolve_data_dir()), td)
 
     def test_audio_hooks_data_when_no_plugin_data(self):
         with tempfile.TemporaryDirectory() as td:
             os.environ["CLAUDE_AUDIO_HOOKS_DATA"] = td
-            mod = _load_module()
-            self.assertEqual(str(mod._resolve_data_dir()), td)
+            self.assertEqual(str(self._prefs()._resolve_data_dir()), td)
 
     def test_falls_through_to_temp_when_nothing_else_present(self):
         # No env vars; we patch Path.home to a clean temp dir so the shared
-        # and cursor-native checks both miss. The result must end with the
-        # legacy ``claude_audio_hooks_queue`` directory name so existing
-        # script-install state stays compatible.
+        # and cursor-native checks both miss. We also redirect the script
+        # path away from this repo so the plugin-cache heuristic misses
+        # (otherwise the test machine's local layout could short-circuit).
+        # The result must end with the legacy ``claude_audio_hooks_queue``
+        # directory name so existing script-install state stays compatible.
         with tempfile.TemporaryDirectory() as fake_home:
-            mod = _load_module()
-            original_home = mod.Path.home
+            from pathlib import Path as _Path
+            import user_preferences as up_mod  # type: ignore
+            original_home = up_mod.Path.home
             try:
-                mod.Path.home = staticmethod(lambda: mod.Path(fake_home))
-                resolved = mod._resolve_data_dir()
+                up_mod.Path.home = staticmethod(lambda: up_mod.Path(fake_home))
+                # Anchor the prefs script_path inside fake_home so the
+                # plugin-detection heuristic falls through cleanly.
+                non_plugin_script = _Path(fake_home) / "user_preferences.py"
+                prefs = self._UserPreferences(REPO, script_path=non_plugin_script)
+                resolved = prefs._resolve_data_dir()
                 self.assertTrue(
                     str(resolved).endswith("claude_audio_hooks_queue"),
                     f"Expected legacy temp fallback, got {resolved}",
                 )
             finally:
-                mod.Path.home = original_home
-
-
-class TestResolveConfigFileSharedFallback(unittest.TestCase):
-    """Regression: ``audio-hooks set`` invoked from the project source tree
-    must write to the same ``user_preferences.json`` the runtime reads.
-
-    The bug this guards: prior to 5.1.4, ``_resolve_config_file()`` only
-    checked the plugin-cache script-path heuristic. When a user ran
-    ``audio-hooks theme set custom`` from the project source tree, that
-    heuristic was False and the writer fell back to
-    ``<project>/config/user_preferences.json`` while the runtime kept reading
-    from ``~/.claude/plugins/data/audio-hooks-chanmeng-audio-hooks/...``.
-    Result: the user's setting silently never took effect.
-
-    The fix added an explicit shared-dir probe between the script-path
-    heuristic and the legacy fallback. This test pins that.
-    """
-
-    def setUp(self):
-        self._saved = {
-            k: os.environ.pop(k, None)
-            for k in ("CLAUDE_PLUGIN_DATA", "CLAUDE_AUDIO_HOOKS_DATA",
-                      "CLAUDE_PLUGIN_ROOT")
-        }
-
-    def tearDown(self):
-        for k, v in self._saved.items():
-            if v is not None:
-                os.environ[k] = v
-            else:
-                os.environ.pop(k, None)
-
-    def test_shared_path_is_chosen_when_user_prefs_exist_there(self):
-        with tempfile.TemporaryDirectory() as fake_home:
-            mod = _load_module()
-            shared_dir = (
-                mod.Path(fake_home)
-                / ".claude" / "plugins" / "data"
-                / "audio-hooks-chanmeng-audio-hooks"
-            )
-            shared_dir.mkdir(parents=True)
-            shared_prefs = shared_dir / "user_preferences.json"
-            shared_prefs.write_text(
-                '{"audio_theme": "custom"}', encoding="utf-8",
-            )
-            original_home = mod.Path.home
-            try:
-                mod.Path.home = staticmethod(lambda: mod.Path(fake_home))
-                resolved = mod._resolve_config_file()
-                self.assertEqual(
-                    resolved, shared_prefs,
-                    f"Resolver should pick the shared user_preferences.json "
-                    f"when it exists; got {resolved}",
-                )
-            finally:
-                mod.Path.home = original_home
-
-    def test_legacy_project_path_used_when_shared_absent(self):
-        # When the shared dir does NOT have user_preferences.json (fresh box,
-        # no Claude Code), we fall through to the legacy script-install path.
-        # We still get a Path back (the file may not exist yet on a clean
-        # install — auto_init handles that elsewhere).
-        with tempfile.TemporaryDirectory() as fake_home:
-            mod = _load_module()
-            original_home = mod.Path.home
-            try:
-                mod.Path.home = staticmethod(lambda: mod.Path(fake_home))
-                resolved = mod._resolve_config_file()
-                # Expect the project-source path (PROJECT_DIR/config/...)
-                self.assertTrue(
-                    str(resolved).endswith("user_preferences.json"),
-                    f"Expected a user_preferences.json path, got {resolved}",
-                )
-                # And specifically NOT inside the fake home (which has no shared dir)
-                self.assertNotIn(fake_home, str(resolved))
-            finally:
-                mod.Path.home = original_home
+                up_mod.Path.home = original_home
 
 
 class TestSessionStartEnvOutput(unittest.TestCase):

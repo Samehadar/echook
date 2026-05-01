@@ -29,6 +29,15 @@ import re
 from pathlib import Path
 from typing import Optional, Dict, Any, List, Tuple
 
+# Ensure the hooks/ dir is importable so `user_preferences` resolves whether
+# this module is invoked directly (`python hooks/hook_runner.py`) or loaded
+# via importlib.util.spec_from_file_location (used by the test harness).
+_HOOKS_DIR = str(Path(__file__).resolve().parent)
+if _HOOKS_DIR not in sys.path:
+    sys.path.insert(0, _HOOKS_DIR)
+
+from user_preferences import UserPreferences, get_prefs  # type: ignore  # noqa: E402
+
 # Version used for auto-sync: when the installed copy in ~/.claude/hooks/
 # detects a newer version in the project directory, it self-updates.
 HOOK_RUNNER_VERSION = "5.1.4"
@@ -42,7 +51,7 @@ HOOK_RUNNER_VERSION = "5.1.4"
 # Error events include a stable `code` enum, a one-sentence `hint`, and an
 # optional `suggested_command` Claude Code can run to fix the issue.
 #
-# Storage location, in priority order (all derived from _resolve_data_dir):
+# Storage location, in priority order (all derived from UserPreferences.data_dir):
 #   1. ${CLAUDE_PLUGIN_DATA}/logs/                  (Claude Code plugin invoke)
 #   2. ${CLAUDE_AUDIO_HOOKS_DATA}/logs/             (explicit override)
 #   3. ~/.claude/plugins/data/audio-hooks-chanmeng-audio-hooks/logs/
@@ -141,41 +150,6 @@ _ERROR_HINTS: Dict[str, Dict[str, str]] = {
 }
 
 
-def _resolve_data_dir() -> Path:
-    """Central authority for the audio-hooks state directory.
-
-    Returns the directory that hosts ``user_preferences.json``, ``logs/`` and
-    ``queue/`` for the active install. The resolution chain is documented
-    above. The shared and Cursor-native fallbacks make the runner work
-    correctly when invoked from Cursor's auto-bridge (which does NOT inject
-    ``CLAUDE_PLUGIN_DATA``) — both editors then read the same preferences.
-    """
-    v = os.environ.get("CLAUDE_PLUGIN_DATA")
-    if v:
-        return Path(v)
-    v = os.environ.get("CLAUDE_AUDIO_HOOKS_DATA")
-    if v:
-        return Path(v)
-    home = Path.home()
-    # Step 3: Claude Code's well-known plugin data dir, even when env var unset.
-    # This is the path Cursor's bridge falls into. Probe for an existing
-    # user_preferences.json so we don't claim it on a fresh box that has only
-    # Cursor and no Claude Code at all.
-    shared = home / ".claude" / "plugins" / "data" / "audio-hooks-chanmeng-audio-hooks"
-    if (shared / "user_preferences.json").exists():
-        return shared
-    # Step 4: Cursor-native install path (audio-hooks install --cursor).
-    cursor_native = home / ".cursor" / "audio-hooks-data"
-    if (cursor_native / "user_preferences.json").exists():
-        return cursor_native
-    # Step 5: legacy temp fallback — preserves pre-5.1.4 behavior.
-    if platform.system() == "Windows":
-        base = Path(os.environ.get("TEMP", os.environ.get("TMP", "C:/Windows/Temp")))
-    else:
-        base = Path("/tmp")
-    return base / "claude_audio_hooks_queue"
-
-
 def detect_invoker() -> str:
     """Return ``"claude-code"`` / ``"cursor"`` / ``"unknown"``.
 
@@ -192,9 +166,17 @@ def detect_invoker() -> str:
     return "unknown"
 
 
+def _prefs() -> UserPreferences:
+    """Return the process-wide UserPreferences singleton, anchored at PROJECT_DIR."""
+    return get_prefs(PROJECT_DIR)
+
+
 def get_log_dir() -> Path:
-    """Resolve the log directory, creating it if necessary."""
-    log_dir = _resolve_data_dir() / "logs"
+    """Resolve the log directory, creating it if necessary.
+
+    Backwards-compatible wrapper around :attr:`UserPreferences.log_dir`.
+    """
+    log_dir = _prefs().log_dir
     try:
         log_dir.mkdir(parents=True, exist_ok=True)
     except OSError:
@@ -539,145 +521,12 @@ PROJECT_DIR = get_project_dir()
 AUDIO_DIR = PROJECT_DIR / "audio"
 
 
-def _is_running_from_plugin() -> bool:
-    """True if this script is being invoked from a plugin install context.
+# Path resolution lives in :class:`UserPreferences` (see
+# ``hooks/user_preferences.py``). The pre-5.1.5 module-level globals and
+# resolver helpers are gone; every consumer now goes through ``_prefs()``
+# so the CLI and the runtime always agree on which ``user_preferences.json``
+# file is canonical.
 
-    Two signals:
-      1. CLAUDE_PLUGIN_DATA is set (hook fire context — Claude Code injects it).
-      2. This file lives under <plugin_root>/hooks/ where
-         <plugin_root>/.claude-plugin/plugin.json exists.
-    """
-    if os.environ.get("CLAUDE_PLUGIN_DATA"):
-        return True
-    try:
-        here = Path(__file__).resolve()
-        plugin_root = here.parent.parent  # hooks/hook_runner.py -> plugin root
-        if (plugin_root / ".claude-plugin" / "plugin.json").exists():
-            return True
-    except Exception:
-        pass
-    return False
-
-
-def _resolve_plugin_data_dir() -> Path:
-    """Compute the plugin data dir even when CLAUDE_PLUGIN_DATA isn't set.
-
-    Per Claude Code docs, the data dir is at ~/.claude/plugins/data/{id}/
-    where {id} is the plugin name with non-[a-zA-Z0-9_-] chars replaced by -.
-    For audio-hooks@chanmeng-audio-hooks the id is
-    'audio-hooks-chanmeng-audio-hooks'.
-
-    Used when the binary is invoked from a Bash tool call via the plugin's
-    bin/ PATH (which doesn't inherit CLAUDE_PLUGIN_DATA from the hook fire
-    context).
-    """
-    home = Path.home()
-    data_root = home / ".claude" / "plugins" / "data"
-    canonical = data_root / "audio-hooks-chanmeng-audio-hooks"
-    if canonical.exists():
-        return canonical
-    if data_root.exists():
-        try:
-            for child in data_root.iterdir():
-                if child.is_dir() and "audio-hooks" in child.name:
-                    return child
-        except OSError:
-            pass
-    # No data dir yet — return canonical so it can be created on first write
-    return canonical
-
-
-def _auto_init_user_prefs(target: Path) -> None:
-    """Copy default_preferences.json into target if target doesn't exist."""
-    if target.exists():
-        return
-    try:
-        target.parent.mkdir(parents=True, exist_ok=True)
-        template = PROJECT_DIR / "config" / "default_preferences.json"
-        if template.exists():
-            import shutil as _sh
-            _sh.copy2(str(template), str(target))
-    except OSError:
-        pass
-
-
-def _resolve_config_file() -> Path:
-    """Resolve user_preferences.json path.
-
-    Resolution order (mirrors ``_resolve_data_dir`` so reads and writes always
-    target the same file regardless of how the runner is invoked):
-      1. CLAUDE_PLUGIN_DATA env var (set by Claude Code in hook fire context)
-      2. CLAUDE_AUDIO_HOOKS_DATA explicit override
-      3. Plugin context detected from script path (CLI invocation via plugin bin/,
-         OR Cursor's auto-bridge which invokes ``~/.claude/plugins/cache/.../hook_runner.py``
-         WITHOUT setting CLAUDE_PLUGIN_DATA)
-      4. **Shared Claude Code plugin data dir** —
-         ``~/.claude/plugins/data/audio-hooks-chanmeng-audio-hooks/user_preferences.json``
-         already exists. This catches the case where the user runs the
-         ``audio-hooks`` CLI from the project source tree (so the script-path
-         heuristic in step 3 is False) but their actual preferences live in
-         the shared plugin data dir. Without this branch, ``audio-hooks set``
-         from the project tree would silently write to a stranded
-         ``<project>/config/user_preferences.json`` while the runtime reads
-         from the shared dir.
-      5. Cursor-native install: ``~/.cursor/audio-hooks-data/user_preferences.json``
-         already exists (created by ``audio-hooks install --cursor``)
-      6. Legacy <project_dir>/config/user_preferences.json (script install)
-
-    For plugin / shared / Cursor-native contexts, the file is auto-initialized
-    from default_preferences.json on first read.
-    """
-    plugin_data = os.environ.get("CLAUDE_PLUGIN_DATA")
-    if plugin_data:
-        target = Path(plugin_data) / "user_preferences.json"
-        _auto_init_user_prefs(target)
-        return target
-
-    explicit = os.environ.get("CLAUDE_AUDIO_HOOKS_DATA")
-    if explicit:
-        target = Path(explicit) / "user_preferences.json"
-        _auto_init_user_prefs(target)
-        return target
-
-    if _is_running_from_plugin():
-        target = _resolve_plugin_data_dir() / "user_preferences.json"
-        _auto_init_user_prefs(target)
-        return target
-
-    home = Path.home()
-    shared = home / ".claude" / "plugins" / "data" / "audio-hooks-chanmeng-audio-hooks"
-    if (shared / "user_preferences.json").exists():
-        return shared / "user_preferences.json"
-
-    cursor_native = home / ".cursor" / "audio-hooks-data"
-    if (cursor_native / "user_preferences.json").exists():
-        return cursor_native / "user_preferences.json"
-
-    return PROJECT_DIR / "config" / "user_preferences.json"
-
-
-CONFIG_FILE = _resolve_config_file()
-
-
-def _resolve_queue_dir() -> Path:
-    """Resolve the runtime state directory (queue + lock files).
-
-    Uses ``_resolve_data_dir`` for the new shared / Cursor-native paths,
-    falling back to ``get_safe_temp_dir()`` only when no editor-specific
-    data dir is detectable. The temp fallback preserves the v5.1.3 layout
-    so existing queue markers continue to work.
-    """
-    base = _resolve_data_dir()
-    # When _resolve_data_dir returns the legacy temp fallback, it ends in
-    # 'claude_audio_hooks_queue' itself (no /queue subdir). Detect and avoid
-    # double-nesting.
-    if base.name == "claude_audio_hooks_queue":
-        return base
-    return base / "queue"
-
-
-QUEUE_DIR = _resolve_queue_dir()
-LOCK_FILE = QUEUE_DIR / "audio.lock"
 _queue_dir_ensured = False
 
 
@@ -685,7 +534,7 @@ def ensure_queue_dir() -> None:
     """Ensure queue directory exists (lazy, called on first use)."""
     global _queue_dir_ensured
     if not _queue_dir_ensured:
-        QUEUE_DIR.mkdir(parents=True, exist_ok=True)
+        _prefs().queue_dir.mkdir(parents=True, exist_ok=True)
         _queue_dir_ensured = True
 
 # Default audio files for each hook type
@@ -725,72 +574,23 @@ DEFAULT_AUDIO_FILES = {
 
 _config_cache: Optional[Dict[str, Any]] = None
 
-def _apply_plugin_option_overlay(config: Dict[str, Any]) -> Dict[str, Any]:
-    """Overlay CLAUDE_PLUGIN_OPTION_* env vars onto the loaded config (v5.0).
-
-    The plugin manifest declares userConfig keys (audio_theme, webhook_url,
-    webhook_format, tts_enabled). Claude Code exposes them to the hook
-    runner as CLAUDE_PLUGIN_OPTION_<KEY> environment variables. This overlay
-    lets Claude Code populate plugin config at install time without writing
-    to user_preferences.json directly.
-
-    Env vars are case-sensitive lowercase per the Claude Code docs.
-    Empty string means "user did not set this — preserve existing value".
-    """
-    overlays = {
-        "CLAUDE_PLUGIN_OPTION_AUDIO_THEME":   ("audio_theme", str),
-        "CLAUDE_PLUGIN_OPTION_WEBHOOK_URL":   ("webhook_settings.url", str),
-        "CLAUDE_PLUGIN_OPTION_WEBHOOK_FORMAT": ("webhook_settings.format", str),
-        "CLAUDE_PLUGIN_OPTION_TTS_ENABLED":   ("tts_settings.enabled", lambda v: v.lower() in ("1", "true", "yes")),
-    }
-    for env_var, (dotted_key, coerce) in overlays.items():
-        raw = os.environ.get(env_var, "").strip()
-        if not raw:
-            continue
-        try:
-            value = coerce(raw)
-        except (TypeError, ValueError):
-            continue
-        # Walk into the config and set the dotted key
-        parts = dotted_key.split(".")
-        cur: Dict[str, Any] = config
-        for p in parts[:-1]:
-            if not isinstance(cur.get(p), dict):
-                cur[p] = {}
-            cur = cur[p]
-        cur[parts[-1]] = value
-        # Auto-enable webhook if a URL was provided via plugin options
-        if env_var == "CLAUDE_PLUGIN_OPTION_WEBHOOK_URL" and value:
-            config.setdefault("webhook_settings", {})["enabled"] = True
-    return config
-
 
 def load_config() -> Dict[str, Any]:
-    """Load configuration from user_preferences.json (cached per invocation)."""
+    """Load user_preferences.json (cached per invocation).
+
+    Auto-init from template, auto-migrate, and CLAUDE_PLUGIN_OPTION_* overlay
+    are all handled by :meth:`UserPreferences.load`.
+    """
     global _config_cache
     if _config_cache is not None:
         return _config_cache
-    if not CONFIG_FILE.exists():
-        log_debug(f"Config file not found: {CONFIG_FILE}")
-        _config_cache = _apply_plugin_option_overlay({})
-        return _config_cache
     try:
-        config = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
-        log_debug(f"Loaded config from {CONFIG_FILE}")
-        _config_cache = _apply_plugin_option_overlay(config)
-        return _config_cache
-    except json.JSONDecodeError as e:
-        log_error(f"Invalid JSON in config file: {e}")
-        _config_cache = _apply_plugin_option_overlay({})
-        return _config_cache
-    except PermissionError as e:
-        log_error(f"Permission denied reading config: {e}")
-        _config_cache = _apply_plugin_option_overlay({})
-        return _config_cache
-    except OSError as e:
-        log_error(f"OS error reading config: {e}")
-        _config_cache = _apply_plugin_option_overlay({})
-        return _config_cache
+        _config_cache = _prefs().load()
+        log_debug(f"Loaded config from {_prefs().config_path}")
+    except Exception as e:
+        log_error(f"Could not load config: {e}")
+        _config_cache = {}
+    return _config_cache
 
 
 def is_hook_enabled(hook_type: str) -> bool:
@@ -817,7 +617,7 @@ def is_hook_enabled(hook_type: str) -> bool:
 def is_snoozed() -> bool:
     """Check if hooks are temporarily snoozed via marker file."""
     ensure_queue_dir()
-    snooze_file = QUEUE_DIR / "snooze_until"
+    snooze_file = _prefs().queue_dir / "snooze_until"
     if not snooze_file.exists():
         return False
     try:
@@ -1009,7 +809,7 @@ def get_debounce_ms() -> int:
 def should_debounce(hook_type: str) -> bool:
     """Check if we should skip this notification due to debounce."""
     ensure_queue_dir()
-    debounce_file = QUEUE_DIR / f"{hook_type}_last_played"
+    debounce_file = _prefs().queue_dir / f"{hook_type}_last_played"
     debounce_sec = get_debounce_ms() / 1000.0
 
     current_time = time.time()
@@ -1927,7 +1727,7 @@ def start_focus_flow(hook_type: str, config: Dict[str, Any]) -> None:
 
     min_seconds = ff.get("min_thinking_seconds", 15)
     ensure_queue_dir()
-    marker = QUEUE_DIR / "focus_flow_active"
+    marker = _prefs().queue_dir / "focus_flow_active"
 
     # Write marker with timestamp
     try:
@@ -1970,7 +1770,7 @@ def check_rate_limits(stdin_data: Dict[str, Any], config: Dict[str, Any]) -> Non
     """Inspect stdin `rate_limits` and play a warning audio when crossing thresholds.
 
     Side effect only: plays one audio cue per (window, threshold, resets_at)
-    tuple, debounced via marker file in QUEUE_DIR. Snooze and the user's
+    tuple, debounced via marker file in the queue dir. Snooze and the user's
     `rate_limit_alerts.enabled` flag both gate this.
 
     Stdin schema (Claude Code v2.1.80+, Claude.ai subscribers only):
@@ -2016,7 +1816,7 @@ def check_rate_limits(stdin_data: Dict[str, Any], config: Dict[str, Any]) -> Non
             if used_int < t_int:
                 continue
             ensure_queue_dir()
-            marker = QUEUE_DIR / f"rate_limit_{window_name}_{t_int}_{resets_int}"
+            marker = _prefs().queue_dir / f"rate_limit_{window_name}_{t_int}_{resets_int}"
             if marker.exists():
                 break
             try:
@@ -2054,8 +1854,9 @@ def check_rate_limits(stdin_data: Dict[str, Any], config: Dict[str, Any]) -> Non
 def stop_focus_flow() -> None:
     """Stop any running Focus Flow micro-task when Claude finishes."""
     ensure_queue_dir()
-    marker = QUEUE_DIR / "focus_flow_active"
-    pid_file = QUEUE_DIR / "focus_flow_pid"
+    queue_dir = _prefs().queue_dir
+    marker = queue_dir / "focus_flow_active"
+    pid_file = queue_dir / "focus_flow_pid"
 
     # Kill micro-task process if running
     if pid_file.exists():
@@ -2103,7 +1904,7 @@ def run_hook(hook_type: str, stdin_data: dict = None) -> int:
     log_event("debug", "hook_start",
               project_dir=str(PROJECT_DIR),
               audio_dir=str(AUDIO_DIR),
-              queue_dir=str(QUEUE_DIR),
+              queue_dir=str(_prefs().queue_dir),
               synthetic_variant=_current_synthetic_variant)
 
     # Check if hook is enabled
@@ -2267,8 +2068,8 @@ def main() -> int:
     # CLAUDE_PLUGIN_DATA pointing at the shared/native data dir. This is the
     # first-class fix for "Cursor plays the wrong theme because preferences
     # aren't found" — without it, each hook firing in a Cursor session falls
-    # back to _resolve_data_dir() at runtime (also correct, but slower and
-    # depends on the file existing already).
+    # back to UserPreferences.data_dir at runtime (also correct, but slower
+    # and depends on the file existing already).
     #
     # Per cursor.com/docs/hooks: "Session-scoped environment variables from
     # `sessionStart` hooks are passed to all subsequent hook executions within
@@ -2277,11 +2078,11 @@ def main() -> int:
     # setup concern, not a notification concern.
     if canonical_hook == "session_start" and detect_invoker() == "cursor":
         try:
-            data_dir = _resolve_data_dir()
+            data_dir = _prefs().data_dir
             sys.stdout.write(json.dumps({"env": {"CLAUDE_PLUGIN_DATA": str(data_dir)}}) + "\n")
             sys.stdout.flush()
         except Exception:
-            pass  # never fatal — the runtime fallback in _resolve_data_dir is the backstop
+            pass  # never fatal — UserPreferences.data_dir is the runtime backstop
 
     # Parse stdin JSON from Claude Code (provides context about the hook event)
     stdin_data = parse_stdin()

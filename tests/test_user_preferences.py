@@ -196,6 +196,20 @@ class TestPluginOverlay(unittest.TestCase):
             cfg = prefs.load()
             self.assertEqual(cfg["webhook_settings"]["url"], "https://example.com/hook")
 
+    def test_webhook_url_overlay_auto_enables_webhook(self):
+        with tempfile.TemporaryDirectory() as td:
+            os.environ["CLAUDE_PLUGIN_DATA"] = td
+            os.environ["CLAUDE_PLUGIN_OPTION_WEBHOOK_URL"] = "https://example.com/hook"
+            (Path(td) / "user_preferences.json").write_text(
+                json.dumps({"_version": "5.1.5", "webhook_settings": {"enabled": False, "url": ""}}),
+                encoding="utf-8",
+            )
+            mod = _load_module()
+            prefs = mod.UserPreferences(REPO)
+            cfg = prefs.load()
+            self.assertEqual(cfg["webhook_settings"]["url"], "https://example.com/hook")
+            self.assertTrue(cfg["webhook_settings"]["enabled"], "URL overlay must auto-enable webhook")
+
     def test_load_auto_inits_from_template_when_missing(self):
         with tempfile.TemporaryDirectory() as td:
             os.environ["CLAUDE_PLUGIN_DATA"] = td

@@ -182,6 +182,11 @@ class UserPreferences:
                 self._set_dotted_in(cfg, dotted_key, coerce(raw))
             except Exception:
                 pass
+        # Side-effect: setting the webhook URL via plugin userConfig should
+        # auto-enable webhooks so they actually fire. Pre-5.1.5 only the CLI
+        # side did this; consolidating here means hook_runner gets it too.
+        if os.environ.get("CLAUDE_PLUGIN_OPTION_WEBHOOK_URL", "").strip():
+            self._set_dotted_in(cfg, "webhook_settings.enabled", True)
         return cfg
 
     @staticmethod

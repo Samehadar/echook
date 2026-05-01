@@ -86,6 +86,28 @@ def _import_hook_runner():
 HR = _import_hook_runner()
 
 
+# Import UserPreferences from hooks/. Path is already on sys.path if HR
+# imported successfully; we still re-add defensively so the module loads
+# even when the runner import failed (e.g. partial install).
+if PROJECT_ROOT is not None:
+    hooks_dir = PROJECT_ROOT / "hooks"
+    if str(hooks_dir) not in sys.path:
+        sys.path.insert(0, str(hooks_dir))
+try:
+    from user_preferences import UserPreferences, get_prefs  # type: ignore
+except ImportError:
+    UserPreferences = None  # type: ignore
+    def get_prefs(*_a, **_k):  # type: ignore
+        raise RuntimeError(
+            "user_preferences module unavailable; reinstall the project"
+        )
+
+
+def _prefs():
+    """Return the process-wide UserPreferences singleton anchored at PROJECT_ROOT."""
+    return get_prefs(PROJECT_ROOT)
+
+
 # ---------------------------------------------------------------------------
 # JSON output helpers
 # ---------------------------------------------------------------------------
@@ -306,142 +328,34 @@ def _redact_url(url: str) -> str:
     return out
 
 
-def _is_running_from_plugin() -> bool:
-    """True if this CLI is invoked from a plugin install context."""
-    if os.environ.get("CLAUDE_PLUGIN_DATA"):
-        return True
-    try:
-        here = Path(__file__).resolve()
-        # bin/audio-hooks.py -> plugin root is parent.parent
-        plugin_root = here.parent.parent
-        if (plugin_root / ".claude-plugin" / "plugin.json").exists():
-            return True
-    except Exception:
-        pass
-    return False
-
-
-def _resolve_plugin_data_dir() -> Path:
-    """Compute the plugin data dir even when CLAUDE_PLUGIN_DATA isn't set."""
-    home = Path.home()
-    data_root = home / ".claude" / "plugins" / "data"
-    canonical = data_root / "audio-hooks-chanmeng-audio-hooks"
-    if canonical.exists():
-        return canonical
-    if data_root.exists():
-        try:
-            for child in data_root.iterdir():
-                if child.is_dir() and "audio-hooks" in child.name:
-                    return child
-        except OSError:
-            pass
-    return canonical
-
-
-def _auto_init_user_prefs(target: Path) -> None:
-    """Copy default_preferences.json into target if target doesn't exist."""
-    if target.exists():
-        return
-    try:
-        target.parent.mkdir(parents=True, exist_ok=True)
-        template = PROJECT_ROOT / "config" / "default_preferences.json"
-        if template.exists():
-            import shutil as _sh
-            _sh.copy2(str(template), str(target))
-    except OSError:
-        pass
-
-
 def _config_path() -> Path:
-    """Resolve user_preferences.json path.
+    """Backwards-compatible thin wrapper around UserPreferences.config_path.
 
-    Resolution order (mirrors hook_runner._resolve_config_file so the CLI
-    writes to the same file the runtime reads):
-      1. CLAUDE_PLUGIN_DATA env var (hook fire context).
-      2. CLAUDE_AUDIO_HOOKS_DATA explicit override.
-      3. Plugin context detected from script path (CLI via plugin bin/).
-      4. Shared Claude Code plugin data dir if user_preferences.json exists
-         there (catches "user runs `audio-hooks ...` from project source but
-         their actual prefs live in ~/.claude/plugins/data/...").
-      5. Cursor-native install dir if user_preferences.json exists there.
-      6. Legacy <project_dir>/config/user_preferences.json (script install).
-
-    Plugin / shared / Cursor-native contexts auto-init from
-    default_preferences.json on first read.
+    Path resolution (CLAUDE_PLUGIN_DATA → CLAUDE_AUDIO_HOOKS_DATA → plugin
+    cache → shared Claude Code dir → Cursor-native → legacy temp) lives in
+    :class:`UserPreferences`. New code should call ``_prefs().config_path``.
     """
-    plugin_data = os.environ.get("CLAUDE_PLUGIN_DATA")
-    if plugin_data:
-        target = Path(plugin_data) / "user_preferences.json"
-        _auto_init_user_prefs(target)
-        return target
-
-    explicit = os.environ.get("CLAUDE_AUDIO_HOOKS_DATA")
-    if explicit:
-        target = Path(explicit) / "user_preferences.json"
-        _auto_init_user_prefs(target)
-        return target
-
-    if _is_running_from_plugin():
-        target = _resolve_plugin_data_dir() / "user_preferences.json"
-        _auto_init_user_prefs(target)
-        return target
-
-    home = Path.home()
-    shared = home / ".claude" / "plugins" / "data" / "audio-hooks-chanmeng-audio-hooks"
-    if (shared / "user_preferences.json").exists():
-        return shared / "user_preferences.json"
-
-    cursor_native = home / ".cursor" / "audio-hooks-data"
-    if (cursor_native / "user_preferences.json").exists():
-        return cursor_native / "user_preferences.json"
-
-    return PROJECT_ROOT / "config" / "user_preferences.json"
-
-
-def _apply_plugin_option_overlay(config: Dict[str, Any]) -> Dict[str, Any]:
-    """Overlay CLAUDE_PLUGIN_OPTION_* env vars onto the loaded config (v5.0.1).
-
-    Mirrors hook_runner._apply_plugin_option_overlay so the CLI sees the same
-    effective config as the hook runner. The plugin manifest declares
-    userConfig keys; Claude Code exposes them via CLAUDE_PLUGIN_OPTION_<KEY>.
-    """
-    overlays = {
-        "CLAUDE_PLUGIN_OPTION_AUDIO_THEME":   ("audio_theme", str),
-        "CLAUDE_PLUGIN_OPTION_WEBHOOK_URL":   ("webhook_settings.url", str),
-        "CLAUDE_PLUGIN_OPTION_WEBHOOK_FORMAT": ("webhook_settings.format", str),
-        "CLAUDE_PLUGIN_OPTION_TTS_ENABLED":   ("tts_settings.enabled", lambda v: v.lower() in ("1", "true", "yes")),
-    }
-    for env_var, (dotted_key, coerce) in overlays.items():
-        raw = os.environ.get(env_var, "").strip()
-        if not raw:
-            continue
-        try:
-            value = coerce(raw)
-        except (TypeError, ValueError):
-            continue
-        _set_dotted(config, dotted_key, value)
-        if env_var == "CLAUDE_PLUGIN_OPTION_WEBHOOK_URL" and value:
-            config.setdefault("webhook_settings", {})["enabled"] = True
-    return config
+    return _prefs().config_path
 
 
 def _load_config_raw() -> Dict[str, Any]:
-    cp = _config_path()
-    if not cp.exists():
-        return _apply_plugin_option_overlay({})
+    """Load user_preferences.json (auto-init from template + plugin-option overlay)."""
+    if PROJECT_ROOT is None:
+        return {}
     try:
-        return _apply_plugin_option_overlay(json.loads(cp.read_text(encoding="utf-8")))
-    except json.JSONDecodeError:
-        return _apply_plugin_option_overlay({})
+        return _prefs().load()
+    except Exception:
+        return {}
 
 
 def _save_config_raw(cfg: Dict[str, Any]) -> Tuple[bool, str]:
-    cp = _config_path()
+    """Save user_preferences.json (atomic write + auto-backup snapshot)."""
+    if PROJECT_ROOT is None:
+        return False, "PROJECT_ROOT not detected"
     try:
-        cp.parent.mkdir(parents=True, exist_ok=True)
-        cp.write_text(json.dumps(cfg, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        _prefs().save(cfg)
         return True, ""
-    except OSError as e:
+    except Exception as e:
         return False, str(e)
 
 
@@ -485,8 +399,11 @@ def _coerce_value(raw: str) -> Any:
 # ---------------------------------------------------------------------------
 
 def _queue_dir() -> Path:
-    if HR is not None:
-        return HR.QUEUE_DIR
+    if PROJECT_ROOT is not None:
+        try:
+            return _prefs().queue_dir
+        except Exception:
+            pass
     return Path("/tmp/claude_audio_hooks_queue")
 
 
@@ -576,10 +493,18 @@ def cmd_status(_args: List[str]) -> int:
     sl = cfg.get("statusline_settings", {}) or {}
     install = _detect_install_mode()
 
-    # Resolve the effective plugin data dir even when CLAUDE_PLUGIN_DATA isn't set
+    # Resolve the effective plugin data dir even when CLAUDE_PLUGIN_DATA isn't set.
+    # When this CLI binary lives inside a plugin layout (parent.parent has
+    # `.claude-plugin/plugin.json`), surface the plugin's shared data dir so
+    # `audio-hooks status` reports the same path the runtime reads.
     plugin_data_dir = os.environ.get("CLAUDE_PLUGIN_DATA")
-    if not plugin_data_dir and _is_running_from_plugin():
-        plugin_data_dir = str(_resolve_plugin_data_dir())
+    if not plugin_data_dir and UserPreferences is not None and PROJECT_ROOT is not None:
+        cli_script = Path(__file__).resolve()
+        cli_plugin_marker = cli_script.parent.parent / ".claude-plugin" / "plugin.json"
+        if cli_plugin_marker.exists():
+            plugin_data_dir = str(
+                UserPreferences(PROJECT_ROOT, script_path=cli_script)._plugin_cache_data_dir()
+            )
 
     emit({
         "ok": True,
