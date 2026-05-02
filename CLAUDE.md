@@ -1,6 +1,6 @@
 # Claude Code Audio Hooks — AI Operator Guide
 
-> **Version:** 5.1.5 | **Last Updated:** 2026-05-01
+> **Version:** 5.1.6 | **Last Updated:** 2026-05-02
 
 This document is the canonical machine-facing guide for the claude-code-audio-hooks project. It is written for **Claude Code (and other AI agents) as the operator** — not for humans. A human user says "install audio hooks for me" or "snooze audio for an hour" and you do everything via the project's structured CLI without any human-in-the-loop confirmation, menu navigation, or log file reading.
 
@@ -162,6 +162,8 @@ The canonical state is `audio-hooks hooks list`. Always run that for the live va
 | `INTERNAL_ERROR` | Unexpected internal error | `audio-hooks logs tail` |
 | `INTERACTIVE_SCRIPT` | Tried to invoke a human-only menu non-interactively | Use `audio-hooks` instead |
 | `INVALID_USAGE` | Bad CLI args | `audio-hooks manifest` |
+| `DUPLICATE_BRIDGE` | `install --cursor` aborted because Claude Code's plugin already auto-bridges Cursor | `audio-hooks uninstall --plugin` (or pass `--force` to `install --cursor` if you understand the trade-off) |
+| `DUPLICATE_BRIDGE_RUNTIME_SKIP` | Runtime skipped a Cursor invocation because `install_marker.json` records `duplicate_bridge_forced: true` (the `--force` install left both paths active) | `audio-hooks uninstall --cursor` |
 
 ## Environment variables
 
@@ -356,6 +358,16 @@ For users who run Cursor but not Claude Code, use `audio-hooks install --cursor`
 
 The install command **aborts with `DUPLICATE_BRIDGE`** when Claude Code's plugin is already installed (the bridge would already cover Cursor; native install on top causes double audio). Pass `--force` only if you understand the trade-off.
 
+**Runtime guard for `--force`:** when `install_marker.json` records `duplicate_bridge_forced: true` and the runner is invoked under Cursor, `hook_runner.py` emits a `duplicate_bridge_runtime_skip` warn-level NDJSON event (error code `DUPLICATE_BRIDGE_RUNTIME_SKIP`) and returns 0 — Claude Code's bridge fires alone. To re-enable the native path, run `audio-hooks uninstall --cursor` and re-install without `--force`.
+
+**Upgrade path** (Cursor-only install, no Claude Code on the machine):
+
+```bash
+cd ~/audio-hooks && git pull && python bin/audio-hooks install --cursor
+```
+
+The install is idempotent (re-running merges the latest template into `~/.cursor/hooks.json` without duplicating entries) and preserves `~/.cursor/audio-hooks-data/user_preferences.json` automatically — `auto-init` only seeds the file when it does not exist. There is no `audio-hooks upgrade --cursor` subcommand; `audio-hooks upgrade` targets Claude Code's plugin cache (see version history) and would conflate scopes if it also touched `~/.cursor/`.
+
 ### Stdin field mapping
 
 Cursor's `cursor_version`, `conversation_id`, `generation_id`, `reason`, `final_status`, `duration_ms`, `is_background_agent`, `workspace_roots`, `model`, `error_message` are surfaced in webhook payloads under a `cursor: {...}` sub-object. `user_email` is **redacted by default** for privacy; set `webhook_settings.include_user_email = true` to opt in.
@@ -370,6 +382,7 @@ Cursor's `cursor_version`, `conversation_id`, `generation_id`, `reason`, `final_
 
 | Version | Date | Highlights |
 |---|---|---|
+| 5.1.6 | 2026-05-02 | **Cursor adaptation hardened.** First-class Cursor install paths in README + INSTALLATION_GUIDE (auto-bridge AND native), marketplace.json + plugin.json now advertise Cursor support (`cursor`/`cursor-ide` keywords). Windows install JSON-escape bug fixed (`D:\github\...` paths previously broke `audio-hooks install --cursor`). Two new runtime guards in `hook_runner.run_hook`: `Notification`/`PermissionRequest` no-op cleanly under Cursor (Cursor has no equivalent events per the bridge docs), and `--force`-installed bridges with `duplicate_bridge_forced: true` in `install_marker.json` runtime-skip with the new `DUPLICATE_BRIDGE_RUNTIME_SKIP` error code so audio fires exactly once. 19 new bridge-contract tests in `tests/test_cursor_bridge.py` (32 total, all green on Linux/Windows/macOS). Cursor-only upgrade recipe documented (`cd ~/audio-hooks && git pull && python bin/audio-hooks install --cursor` — idempotent, preserves prefs). No config schema change — `_version` stays at 5.1.5 so existing user_preferences.json files are untouched on upgrade. |
 | 5.1.5 | 2026-05-01 | **Painless upgrades.** New `UserPreferences` class as single source of truth eliminates the dual-implementation bug. `audio-hooks upgrade` wraps `claude plugin update`/`uninstall+install` with `--keep-data` automatically. Auto-migration on load preserves user values when future versions add new keys. Dual-location backups survive `claude plugin uninstall`. `audio-hooks backup list/show/restore/prune` subcommands. New `config/_defaults_baseline.json` + `tests/test_defaults_stability.py` enforce no-default-flip policy at CI. 5.1.4 default flips for `subagent_stop` / `permission_denied` / `task_created` are reverted. |
 | 5.1.4 | 2026-05-01 | **Cursor IDE compatibility.** Diagnostic and fix: Cursor IDE 3.2.16+ auto-bridges Claude Code plugins (per [cursor.com/docs/reference/third-party-hooks](https://cursor.com/docs/reference/third-party-hooks)) but does NOT inject `CLAUDE_PLUGIN_DATA`, so the runner had been falling back to bundled defaults. New `_resolve_data_dir()` priority chain shares one `user_preferences.json` between Claude Code and Cursor. New `session_start` env-output propagates `CLAUDE_PLUGIN_DATA` to every subsequent Cursor hook. NDJSON events and webhook payloads now carry `invoker` field + `cursor: {...}` sub-object surfacing Cursor stdin fields (with `user_email` redacted by default). New `audio-hooks install --cursor` writes `~/.cursor/hooks.json` for users who run Cursor without Claude Code; aborts with `DUPLICATE_BRIDGE` if the Claude Code plugin is already installed. New `editor_targets` block in `status` / `diagnose` / `manifest` reports per-editor registration state. 13 new unit tests in `tests/test_cursor_bridge.py`. Cursor users must run `/plugin uninstall` + `/plugin install` once to refresh the cached plugin code Cursor's bridge invokes — see CHANGELOG. |
 | 5.1.3 | 2026-04-28 | **Status line clarity for `/model` switches.** Context segment now renders absolute counts alongside the percentage (e.g. `Context: 83% (166K/200K) 🛑 /compact`) so a sudden jump after switching from a 1M-context variant to a 200K window is self-explanatory rather than alarming. The numerator is derived from `used_percentage × context_window_size` (Claude Code's `total_input_tokens` field counts only literal input, not cache reads, so it understates real usage by 30× in cache-heavy sessions like Claude Code itself). New `CLAUDE_HOOKS_DEBUG=1` (or `true`/`yes`) behaviour: the status line script atomically dumps the latest stdin JSON to `${state_dir}/statusline.last_input.json` for diagnostics. New `tests/test_statusline.py` (25 cases) wired into the CI matrix — covers malformed JSON, missing fields, the `(X/Y)` math, `CLAUDE_HOOKS_DEBUG` toggle parity with `hook_runner`, and a regression guard against the pre-release bug where `total_input_tokens` was used as the numerator. |

@@ -1,6 +1,6 @@
 # Installation Guide
 
-> **Version:** 5.1.5 | **Last Updated:** 2026-05-01
+> **Version:** 5.1.6 | **Last Updated:** 2026-05-02
 
 The install is two slash commands inside Claude Code. This page is a pointer to the canonical install paths — there are no human-only steps to read through.
 
@@ -37,6 +37,58 @@ bash scripts/install-complete.sh
 The installer auto-engages non-interactive mode when stdin is not a TTY or `CLAUDE_NONINTERACTIVE=1` is set, so AI agents and CI can run it without prompts. For Windows native (PowerShell), use `.\scripts\install-windows.ps1`.
 
 **Don't enable both paths** — they fire on every event independently and you'll hear double audio. `audio-hooks diagnose` reports `DUAL_INSTALL_DETECTED` if it finds both and tells you exactly how to fix it.
+
+## Cursor IDE
+
+The project ships AI-first install paths for Cursor IDE 3.2.16+. There are two of them; the right one depends on whether you also have Claude Code.
+
+### Path A — Cursor + Claude Code (auto-bridge)
+
+If you already have Claude Code on the same machine, run the recommended plugin install above. Cursor 3.2.16+ then auto-bridges every Claude Code plugin per [cursor.com/docs/reference/third-party-hooks](https://cursor.com/docs/reference/third-party-hooks). Enable Cursor Settings → "Third-party skills" if not already on.
+
+Verify by asking your agent:
+
+```text
+> run audio-hooks status
+```
+
+Expected: `editor_targets.cursor.state` == `bridged-via-claude-code`. 8 of 10 hook events bridge — `Notification` and `PermissionRequest` have no Cursor equivalent (per Cursor's docs) and stay silent under Cursor by design.
+
+### Path B — Cursor without Claude Code (native install)
+
+Paste a single prompt into Cursor's agent chat:
+
+> *"Clone https://github.com/ChanMeng666/claude-code-audio-hooks into ~/audio-hooks, then run `python ~/audio-hooks/bin/audio-hooks install --cursor`. After it succeeds, restart Cursor."*
+
+The `install --cursor` subcommand:
+
+- Reads the canonical `cursor-hooks/hooks.json` template.
+- Substitutes `{{PYTHON}}` and `{{HOOK_RUNNER}}` with absolute paths.
+- Merges into `~/.cursor/hooks.json` (preserves any of your other Cursor hooks).
+- Tags every entry with `_managed_by: "audio-hooks"` so uninstall is scope-safe.
+- Seeds `~/.cursor/audio-hooks-data/user_preferences.json` from the bundled defaults.
+
+It is fully non-interactive (no prompts, no menus) and idempotent (re-running does not duplicate entries).
+
+The native install registers 11 Cursor-native event types — the 8 bridge-mapped events plus `subagentStart`, `postToolUseFailure`, and `afterFileEdit` (Cursor-only events with no Claude Code equivalent and so absent from the auto-bridge).
+
+**`DUPLICATE_BRIDGE` guard:** if Claude Code's plugin is already installed, `install --cursor` aborts to prevent double audio. Pass `--force` only if you understand the trade-off.
+
+### Upgrading the Cursor-only install
+
+```bash
+cd ~/audio-hooks && git pull && python bin/audio-hooks install --cursor
+```
+
+Re-running the install is idempotent and preserves `~/.cursor/audio-hooks-data/user_preferences.json`. There is no separate `audio-hooks upgrade --cursor` subcommand — `audio-hooks upgrade` targets Claude Code's plugin cache.
+
+### Uninstalling the Cursor-only install
+
+```bash
+python ~/audio-hooks/bin/audio-hooks uninstall --cursor
+```
+
+Removes only entries tagged `_managed_by: "audio-hooks"` from `~/.cursor/hooks.json`. Preserves `~/.cursor/audio-hooks-data/user_preferences.json` so a future re-install picks up your settings. Pass `--purge` to delete that data dir as well.
 
 ## Lite tier (zero-dependency, no Python)
 

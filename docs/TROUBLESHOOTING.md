@@ -1,6 +1,6 @@
 # Troubleshooting
 
-> **Version:** 5.1.5 | **Last Updated:** 2026-05-01
+> **Version:** 5.1.6 | **Last Updated:** 2026-05-02
 
 The troubleshooting story is one command:
 
@@ -24,6 +24,9 @@ It returns a JSON document listing the platform, audio player binary, the state 
 | `DUAL_INSTALL_DETECTED` | Both legacy script install and plugin install are active | `bash scripts/uninstall.sh --yes` (removes legacy, preserves config + audio) |
 | `PROJECT_DIR_NOT_FOUND` | Could not locate project directory | Ensure the project files are present at the install location |
 | `INTERACTIVE_SCRIPT` | You tried to invoke a human-only menu non-interactively (configure.sh / test-audio.sh) | Use `audio-hooks` instead |
+| `DUPLICATE_BRIDGE` | `install --cursor` aborted because Claude Code's plugin already auto-bridges to Cursor (would cause double audio) | `audio-hooks uninstall --plugin` first, **or** pass `--force` to `install --cursor` if you want both paths active (rare) |
+| `DUPLICATE_BRIDGE_RUNTIME_SKIP` | Runtime skipped a Cursor invocation because `install_marker.json` records `duplicate_bridge_forced: true` (you ran `install --cursor --force` over an active bridge) | `audio-hooks uninstall --cursor` to remove the native install — Claude Code's bridge then handles Cursor normally |
+| `CURSOR_NOT_FOUND` | `install --cursor` couldn't find `~/.cursor/` | Install Cursor IDE first, then re-run |
 | `INTERNAL_ERROR` | Unexpected internal error | `audio-hooks logs tail --level error --n 50` and report it as a GitHub issue |
 
 ## Symptoms
@@ -147,6 +150,59 @@ $env:CLAUDE_HOOKS_DEBUG = "1"; claude
 After any status line refresh, the latest stdin JSON is dumped to `${state_dir}/statusline.last_input.json`. Check `context_window.context_window_size` to see what window Claude Code thinks it's using.
 
 > ⚠️ The dump may contain workspace paths and the last assistant message — disable `CLAUDE_HOOKS_DEBUG` when not actively diagnosing.
+
+### Cursor IDE: no audio at all
+
+Run `audio-hooks status` and look at `editor_targets.cursor.state`:
+
+| State | Meaning | Fix |
+|---|---|---|
+| `bridged-via-claude-code` | Cursor is auto-bridging the Claude Code plugin (8 of 10 hooks). | Working as designed — confirm Cursor Settings → "Third-party skills" is enabled. |
+| `native` | You ran `audio-hooks install --cursor`; Cursor reads `~/.cursor/hooks.json`. | Restart Cursor, then `audio-hooks test all`. |
+| `inactive` | No integration. Either Cursor's "Third-party skills" is off, or no hooks file exists. | Either run `audio-hooks install --cursor`, or install the Claude Code plugin and toggle Cursor's setting on. |
+| `double-registered` | Both bridge AND native install present — see "fires twice" below. | `audio-hooks uninstall --cursor`. |
+
+If the state looks right but audio still doesn't fire, check `audio-hooks logs tail --n 50` for `skipped_no_cursor_equivalent` events — `Notification` and `PermissionRequest` are deliberately silent under Cursor (no equivalent events; this is per [cursor.com/docs/reference/third-party-hooks](https://cursor.com/docs/reference/third-party-hooks)).
+
+### Cursor IDE: audio fires twice on every event
+
+You have both Cursor's auto-bridge AND a native install firing. Confirm with `audio-hooks status` — it reports `editor_targets.cursor.state: "double-registered"`. Fix:
+
+```bash
+audio-hooks uninstall --cursor          # removes the native install; bridge stays
+```
+
+Or if you specifically need the native path (rare — `--force`-installed): uninstall the Claude Code plugin instead:
+
+```bash
+audio-hooks uninstall --plugin
+```
+
+If you intentionally want both paths active despite the double-fire, the runtime since 5.1.6 will detect `install_marker.json` records `duplicate_bridge_forced: true` and silently skip the native firing under Cursor (logs `DUPLICATE_BRIDGE_RUNTIME_SKIP` warn-level event) so audio still plays exactly once. Verify with `audio-hooks logs tail --level warn`.
+
+### `audio-hooks install --cursor` fails with `INTERNAL_ERROR: Template is not valid JSON after substitution`
+
+You're on a project version older than 5.1.6 on Windows. Pre-5.1.6, paths like `D:\github\claude-code-audio-hooks\hooks\hook_runner.py` were substituted directly into the JSON template, and the backslashes were interpreted as invalid JSON escapes (`\g`, `\h`, etc).
+
+Fix: upgrade to 5.1.6 or later. Either `git pull` if you cloned the repo, or `audio-hooks upgrade` for plugin installs.
+
+### `audio-hooks install --cursor` aborts with `DUPLICATE_BRIDGE`
+
+Claude Code's plugin is already installed, so Cursor is already auto-bridging this project. Adding a native install on top would fire every event twice. Either:
+
+- **Recommended:** Don't run native install. The auto-bridge already covers Cursor. Verify with `audio-hooks status`.
+- **If you really want both paths:** pass `--force`. The runtime will then runtime-skip the native firing path (5.1.6+), so audio still plays exactly once via Claude Code's bridge.
+
+### Cursor is playing the wrong audio theme even after I changed it
+
+Cursor reads cached plugin code at `~/.claude/plugins/cache/<id>/<ver>/`. After changing themes via `audio-hooks theme set`, Cursor should pick up the new setting on its next session start (the `session_start` hook emits `{"env": {"CLAUDE_PLUGIN_DATA": "<path>"}}` to stdout, which Cursor propagates to subsequent hooks in the same session per its own docs).
+
+If it doesn't:
+
+1. Restart Cursor (this re-reads `~/.claude/plugins/installed_plugins.json` and refreshes the bridge).
+2. If the issue persists, refresh the cached plugin code with `audio-hooks upgrade` — it wraps `claude plugin update` (data-preserving) with a fallback to `uninstall --keep-data + install`.
+
+If you're running 5.1.3 or earlier, the runner had a known bug where it fell back to bundled defaults when `CLAUDE_PLUGIN_DATA` wasn't injected (which Cursor does not inject). 5.1.4+ fixed this via the 6-level path-resolution chain in `hooks/user_preferences.py:_resolve_data_dir()`.
 
 ### Webhook not receiving events
 

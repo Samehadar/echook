@@ -1,6 +1,6 @@
 # System Architecture
 
-> **Version:** 5.1.5 | **Last Updated:** 2026-05-01
+> **Version:** 5.1.6 | **Last Updated:** 2026-05-02
 
 This document explains the technical architecture of claude-code-audio-hooks. It is the developer-facing deep dive — for operating the project, see [CLAUDE.md](../CLAUDE.md) (the canonical AI doc) or [README.md](../README.md). For the live machine description of every subcommand and config key, run `audio-hooks manifest`.
 
@@ -239,6 +239,72 @@ Users can customise which segments appear via `statusline_settings.visible_segme
 | `configure.sh` | Human-only menu | **no** — auto-redirects to `audio-hooks` via `INTERACTIVE_SCRIPT` JSON pointer when invoked non-interactively |
 | `test-audio.sh` | Human-only menu | **no** — same |
 | `diagnose.py` | Legacy diagnose | yes (`audio-hooks diagnose` is preferred) |
+
+### 6. Cursor IDE integration (5.1.4+, hardened in 5.1.6)
+
+Cursor IDE 3.2.16+ is a first-class invoker for this project. The integration has two distinct paths, each with different runtime invariants:
+
+```mermaid
+flowchart TD
+    subgraph PathA[Path A — Auto-bridge]
+        CC_PLUGIN[Claude Code plugin installed] --> CC_REG[~/.claude/plugins/installed_plugins.json]
+        CC_REG --> CURSOR_BRIDGE[Cursor's Hooks Service reads it on workspace open]
+        CURSOR_BRIDGE --> CURSOR_INVOKE[Cursor invokes runner/run.py from cache/]
+    end
+    subgraph PathB[Path B — Native install]
+        NATIVE_FILE[~/.cursor/hooks.json _managed_by audio-hooks] --> CURSOR_NATIVE[Cursor reads on session start]
+        CURSOR_NATIVE --> NATIVE_INVOKE[Cursor invokes hook_runner.py directly]
+    end
+    CURSOR_INVOKE --> RUNNER[hook_runner.py main]
+    NATIVE_INVOKE --> RUNNER
+    RUNNER --> GUARDS{runtime guards}
+    GUARDS -->|notification + permission_request| SKIP1[skipped_no_cursor_equivalent]
+    GUARDS -->|duplicate_bridge_forced| SKIP2[DUPLICATE_BRIDGE_RUNTIME_SKIP]
+    GUARDS -->|else| FIRE[normal run_hook flow]
+    style RUNNER fill:#7ED321,color:#000
+    style GUARDS fill:#F5A623,color:#000
+```
+
+**Path A: auto-bridge (most users).** Cursor 3.2.16+ scans `~/.claude/plugins/installed_plugins.json` on every workspace open and registers the plugin's `hooks/hooks.json` events as Cursor's own session hooks. Cursor invokes `~/.claude/plugins/cache/chanmeng-audio-hooks/audio-hooks/<ver>/runner/run.py` on its own session events, but **does not inject `CLAUDE_PLUGIN_DATA`** and **does not pass through Claude Code's stdin schema** — Cursor uses its own (camelCase event names, fields like `cursor_version`, `conversation_id`, `final_status`, `duration_ms`, `is_background_agent`, `workspace_roots`, `model`, `error_message`, plus compat fields `session_id`, `hook_event_name`, `transcript_path`).
+
+**Path B: native install (Cursor without Claude Code).** `audio-hooks install --cursor` writes `~/.cursor/hooks.json` from the canonical template at `cursor-hooks/hooks.json`, substituting `{{PYTHON}}` and `{{HOOK_RUNNER}}` with absolute paths. The substituted JSON is the source of truth: every event entry is tagged `"_managed_by": "audio-hooks"` so `uninstall --cursor` can scope its cleanup. Backslashes in Windows paths are JSON-escaped before substitution (5.1.6 fix; pre-5.1.6 substituted raw, producing invalid JSON).
+
+**Bridge mapping (Cursor's responsibility, per [cursor.com/docs/reference/third-party-hooks](https://cursor.com/docs/reference/third-party-hooks)):**
+
+| Claude Code | Cursor | Bridge |
+|---|---|---|
+| PreToolUse | preToolUse | yes |
+| PostToolUse | postToolUse | yes |
+| UserPromptSubmit | beforeSubmitPrompt | yes |
+| Stop | stop | yes |
+| SubagentStop | subagentStop | yes |
+| SessionStart | sessionStart | yes |
+| SessionEnd | sessionEnd | yes |
+| PreCompact | preCompact | yes |
+| Notification | — | NO Cursor equivalent |
+| PermissionRequest | — | NO Cursor equivalent |
+
+`subagentStart`, `postToolUseFailure`, and `afterFileEdit` are **Cursor-native events** — they exist in Cursor but have no Claude Code equivalent and so cannot be auto-bridged. The Path B template registers them; the Path A bridge cannot.
+
+**Tool-name mapping (Cursor side):** `Bash`→`Shell`, `Edit`→`Write`. `Glob` / `WebFetch` / `WebSearch` matchers do not fire under Cursor (Cursor lacks these tool types).
+
+**Key components:**
+
+| Function | Location | Purpose |
+|---|---|---|
+| `detect_invoker()` | `hooks/hook_runner.py` | Returns `"claude-code"` / `"cursor"` / `"unknown"` from env vars (`CURSOR_VERSION`, `CLAUDE_PLUGIN_DATA`, `CLAUDE_PLUGIN_ROOT`). Cursor wins when both are set. Cached per-process via `_invoker_cache`. |
+| `UserPreferences._resolve_data_dir()` | `hooks/user_preferences.py` | 6-level fallback chain: `CLAUDE_PLUGIN_DATA` → `CLAUDE_AUDIO_HOOKS_DATA` → plugin-cache detection → `~/.claude/plugins/data/<id>/` (if user_preferences.json exists) → `~/.cursor/audio-hooks-data/` (if user_preferences.json exists) → legacy temp dir. The Cursor branch is the 5.1.4 anti-stranding fix. |
+| `session_start` env-emit | `hooks/hook_runner.py:main()` | When invoker is Cursor, writes `{"env": {"CLAUDE_PLUGIN_DATA": "<path>"}}` to stdout. Per Cursor's docs, `sessionStart` env outputs propagate to every subsequent hook in the session — so all later hooks see the right path without depending on the runtime fallback. Silent when invoker is not Cursor. |
+| `_read_install_marker()` | `hooks/hook_runner.py` | Reads `${data_dir}/install_marker.json` once per process (cached as `{}` on miss). Used by the runtime double-fire guard. |
+| `run_hook()` runtime guards | `hooks/hook_runner.py` | (1) If invoker is Cursor and hook is `notification`/`permission_request`: log `skipped_no_cursor_equivalent` and exit 0. (2) If invoker is Cursor and `duplicate_bridge_forced: true`: log `duplicate_bridge_runtime_skip` (`DUPLICATE_BRIDGE_RUNTIME_SKIP`) and exit 0. Both guards run before any audio/notification/webhook firing. |
+| `_install_cursor` / `_uninstall_cursor` | `bin/audio-hooks.py` | Path B installer. Detects DUPLICATE_BRIDGE via `_detect_install_mode()` (reads `~/.claude/plugins/installed_plugins.json`). `--force` overrides the abort and stamps `duplicate_bridge_forced: true` in the install marker. Uninstall removes only `_managed_by: audio-hooks` entries; `--purge` deletes `~/.cursor/audio-hooks-data/` too. |
+| `_detect_editor_targets()` | `bin/audio-hooks.py` | Reports per-editor state: `active` / `bridged-via-claude-code` / `native` / `double-registered` / `inactive`. Surfaced in `status`, `diagnose`, and `manifest` output. |
+
+**Webhook payload extensions:** when invoker is Cursor, the raw payload includes `invoker: "cursor"` plus a `cursor: {...}` sub-object surfacing the Cursor-specific stdin fields. `user_email` is **redacted by default** (`webhook_settings.include_user_email` opt-in flag; off because the webhook URL may be third-party).
+
+**NDJSON event log:** every event includes an `invoker` field for cross-IDE filtering. `audio-hooks logs tail --invoker cursor` is the canonical filter (also reachable as a `jq` query against `events.ndjson`).
+
+**Test contract:** `tests/test_cursor_bridge.py` (32 cases as of 5.1.6) pins all of the above as invariants. Adding a new bridge-relevant code path? Add a regression test there.
 
 ## Hook event lifecycle (full detail)
 

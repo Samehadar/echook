@@ -155,7 +155,7 @@ def require_project_root() -> int:
 # Project state — version, install detection, hook catalogue
 # ---------------------------------------------------------------------------
 
-PROJECT_VERSION = "5.1.5"
+PROJECT_VERSION = "5.1.6"
 
 # Canonical hook catalogue. Order matches CLAUDE.md and the install scripts.
 HOOK_CATALOG: List[Dict[str, Any]] = [
@@ -1195,8 +1195,14 @@ def _install_cursor(*, force: bool) -> int:
     # there because of the Microsoft Store stub); 'python3' on POSIX.
     python_bin = "python" if platform.system() == "Windows" else "python3"
     hook_runner_abs = str((PROJECT_ROOT / "hooks" / "hook_runner.py").resolve())
+    # The template is JSON, and the substituted value lands inside a JSON
+    # string literal. On Windows, paths contain backslashes that JSON treats
+    # as escapes — ``D:\github\...`` would parse as ``\g`` (invalid). Escape
+    # backslashes (and any double quotes) before substitution so the
+    # post-substitution text remains valid JSON on every platform.
+    hook_runner_for_json = hook_runner_abs.replace("\\", "\\\\").replace('"', '\\"')
     template_text = template_text.replace("{{PYTHON}}", python_bin)
-    template_text = template_text.replace("{{HOOK_RUNNER}}", hook_runner_abs)
+    template_text = template_text.replace("{{HOOK_RUNNER}}", hook_runner_for_json)
 
     try:
         new_doc = json.loads(template_text)

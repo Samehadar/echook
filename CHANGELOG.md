@@ -5,6 +5,41 @@ All notable changes to Claude Code Audio Hooks will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.1.6] - 2026-05-02
+
+> **Cursor user? You can now operate this project AI-first end-to-end on either install path.** README has a dedicated *Cursor IDE — Same Project, Two Install Paths* section, the marketplace metadata advertises Cursor support, and a `git clone + python bin/audio-hooks install --cursor` flow gets you running on Cursor without Claude Code in two prompts. The Windows install bug surfaced in 5.1.5 (paths like `D:\github\...` produced invalid JSON during template substitution and aborted with `INTERNAL_ERROR`) is fixed.
+
+Cursor IDE adaptation completeness pass on top of 5.1.5's painless-upgrade work. Discoverability gaps closed (README, marketplace.json, plugin.json, INSTALLATION_GUIDE.md), 19 new bridge-contract tests added, two runtime guards landed in `hook_runner.run_hook` (Notification/PermissionRequest no-op under Cursor, runtime double-fire suppression for `--force` installs), Windows JSON-escape bug in `_install_cursor` fixed, new stable error code `DUPLICATE_BRIDGE_RUNTIME_SKIP` exposed via the manifest, Cursor-only upgrade recipe documented in CLAUDE.md and SKILL.md.
+
+### Fixed
+
+- **`audio-hooks install --cursor` produced invalid JSON on Windows** — `bin/audio-hooks.py:_install_cursor` substituted `hook_runner_abs` (e.g., `D:\github\claude-code-audio-hooks\hooks\hook_runner.py`) directly into the JSON template at `cursor-hooks/hooks.json`, causing `\g`, `\h`, etc. to be interpreted as invalid JSON escapes. Install aborted with `INTERNAL_ERROR: Template is not valid JSON after substitution`. Now JSON-escapes backslashes and double quotes before substitution; verified end-to-end on Windows + the new test `test_install_writes_hooks_json_with_substituted_paths` exercises the substitution path under pytest. POSIX users were never affected because `/usr/...` paths contain no characters JSON treats as escapes.
+
+### Added
+
+- **`hooks/hook_runner.py: ErrorCode.DUPLICATE_BRIDGE_RUNTIME_SKIP`** — new stable error code, surfaced via `audio-hooks manifest`'s `error_codes` block. Emitted by the runtime guard added below. Its `suggested_command` is `audio-hooks uninstall --cursor`, which is the correct one-shot recovery for an operator who used `--force` on top of an active Claude Code bridge.
+- **Runtime guard in `run_hook()` for Notification + PermissionRequest under Cursor.** Per [cursor.com/docs/reference/third-party-hooks](https://cursor.com/docs/reference/third-party-hooks), Cursor's bridge maps 8 of 10 Claude Code events; `Notification` and `PermissionRequest` have no Cursor equivalent. The runner now emits a `skipped_no_cursor_equivalent` debug NDJSON event and returns 0 cleanly when invoked under Cursor. Today this never matters because Cursor never invokes them, but it locks down the contract against hand-edited `~/.cursor/hooks.json` files and against future Cursor releases that might add equivalents. Regression-guarded: a sibling test confirms the no-op does NOT fire under Claude Code invoker.
+- **Runtime double-fire suppression when `install --cursor --force` was used over an active Claude Code bridge.** New `_read_install_marker()` helper reads `${data_dir}/install_marker.json` once per process. When invoker is Cursor and the marker records `duplicate_bridge_forced: true`, the runtime emits a `duplicate_bridge_runtime_skip` warn-level event with `error.code: "DUPLICATE_BRIDGE_RUNTIME_SKIP"` and returns 0 — Claude Code's bridge fires alone, audio plays exactly once. Operators who genuinely want both paths active can remove the marker; `audio-hooks status` already warns them they are in this state.
+- **README.md "Cursor IDE — Same Project, Two Install Paths" section.** Path A (auto-bridge with Claude Code) gets a one-line verification prompt; Path B (Cursor only) gets a single agent prompt that does the entire `git clone + install --cursor` end-to-end. Plus an upgrade recipe (`git pull && install --cursor`, idempotent and preserves `user_preferences.json`), an uninstall table, and an explicit "already have Claude Code? Don't run Path B" callout citing the `DUPLICATE_BRIDGE` guard.
+- **`docs/INSTALLATION_GUIDE.md` Cursor IDE section.** Mirrors README's two paths, plus the `audio-hooks uninstall --cursor` flow with `--purge` and `_managed_by` semantics, plus a note that there is intentionally no `audio-hooks upgrade --cursor` subcommand (the existing `upgrade` targets Claude Code's plugin cache; conflating the two scopes would be a footgun).
+- **CLAUDE.md + SKILL.md Cursor-only upgrade recipe.** Spells out `cd ~/audio-hooks && git pull && python bin/audio-hooks install --cursor` for AI agents operating on a user's behalf. Existing Claude-Code-targeted `audio-hooks upgrade` left unchanged.
+- **19 new unit tests in `tests/test_cursor_bridge.py`** across 6 new TestCase classes: template validity (all 8 bridgeable events present, every command arg resolves to a real handler), `_resolve_data_dir` Cursor fallback regression, Notification/PermissionRequest no-op invariant (positive + negative cases), `install --cursor` end-to-end (substituted paths, seeded prefs, install_marker, idempotent re-run), `DUPLICATE_BRIDGE` detection + `--force` override, uninstall preserves user prefs/foreign entries (with `--purge` semantics), runtime double-fire suppression. **102/102 tests pass on Linux + Windows + macOS** (the 32 in `test_cursor_bridge.py` plus 70 elsewhere). The new tests caught the Windows JSON-escape bug fixed above.
+
+### Changed
+
+- **`.claude-plugin/marketplace.json` description and keywords** now advertise Cursor compatibility (`"cursor"` + `"cursor-ide"` keywords, "Auto-bridges to Cursor IDE 3.2.16+; native install for Cursor-only via 'audio-hooks install --cursor'." sentence appended). Also fixes pre-existing version drift: was at 5.1.3 while everything else was at 5.1.5.
+- **`plugins/audio-hooks/.claude-plugin/plugin.json`** mirrors the marketplace.json description + keywords change.
+- **`cursor-hooks/hooks.json _audio_hooks_version`** bumped from 5.1.5 to 5.1.6 so an uninstall can identify which release wrote the entries it is removing.
+
+### Verified against current Cursor docs (no code change needed)
+
+- `subagentStart`, `postToolUseFailure`, `afterFileEdit` — all confirmed real Cursor-native events via WebFetch of [cursor.com/docs/hooks](https://cursor.com/docs/hooks). They are absent from Cursor's bridge mapping (only 8 events bridge from Claude Code) but valid native targets, which is why `cursor-hooks/hooks.json` registers them for the Path B install. CLAUDE.md now documents this distinction explicitly.
+
+### Compatibility
+
+- **No config schema change.** `config/default_preferences.json` `_version` and `config/_defaults_baseline.json` are intentionally still at 5.1.5 — no new config keys, no default flips, so the auto-migration logic introduced in 5.1.5 has nothing to migrate. Existing users who upgrade from 5.1.5 to 5.1.6 see zero changes in their `user_preferences.json`.
+- **No Cursor user action required.** Path A users (auto-bridge): refresh via `audio-hooks upgrade` to pick up the new runtime guards. Path B users: `cd ~/audio-hooks && git pull && python bin/audio-hooks install --cursor` (idempotent; preserves your preferences).
+
 ## [5.1.5] - 2026-05-01
 
 > **⚠️ For users who got bit by 5.1.4.** If your `audio_hooks` was reinitialised under 5.1.4 (e.g., via a `claude plugin uninstall` without `--keep-data`) and you now hear `subagent_stop` / `permission_denied` / `task_created` audio you didn't want, run: `audio-hooks hooks disable subagent_stop permission_denied task_created`. Migration logic from 5.1.5 forward will preserve your choice across all future upgrades.

@@ -7,10 +7,10 @@
 **AI-operated audio notification system for Claude Code & Cursor IDE.**<br/>
 You type one slash command at install time. Then natural language forever.<br/>
 26 hook events, 2 audio themes, rate-limit alerts, webhooks, TTS, context monitor — all operated by Claude Code on your behalf.<br/>
-**🆕 5.1.5 — Painless upgrades.** Existing users never lose config across upgrades. New `audio-hooks upgrade` wraps `claude plugin update` / `uninstall + install` with `--keep-data` automatically; auto-migration preserves your settings when new keys are added in future versions; dual-location backups survive even rough `claude plugin uninstall`. Run it any time you want to refresh the plugin code Cursor's bridge invokes. See [CHANGELOG](./CHANGELOG.md#515---2026-05-01).
+**🆕 5.1.6 — Cursor IDE adaptation hardened.** First-class install path for Cursor users (auto-bridge AND native install), Windows install JSON-escape bug fix (paths like `D:\github\...` no longer break `audio-hooks install --cursor`), runtime guards so `Notification`/`PermissionRequest` audio cleanly no-op under Cursor, new `DUPLICATE_BRIDGE_RUNTIME_SKIP` error code, +19 unit tests pinning the bridge contract. See [CHANGELOG](./CHANGELOG.md#516---2026-05-02). 5.1.5's painless-upgrade fixes are still active.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-5.1.5-blue.svg)](https://github.com/ChanMeng666/claude-code-audio-hooks)
+[![Version](https://img.shields.io/badge/version-5.1.6-blue.svg)](https://github.com/ChanMeng666/claude-code-audio-hooks)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-green.svg)](https://github.com/ChanMeng666/claude-code-audio-hooks)
 [![Claude Code](https://img.shields.io/badge/Claude_Code-v2.1.80%2B-brightgreen.svg)](https://claude.ai/download)
 [![Plugin](https://img.shields.io/badge/install-just_talk_to_Claude-purple.svg)](#-install-in-60-seconds)
@@ -178,6 +178,51 @@ sequenceDiagram
 ```
 
 </details>
+
+---
+
+## Cursor IDE — Same Project, Two Install Paths
+
+The project ships AI-first install paths for Cursor IDE 3.2.16+ users. Pick the one that matches your setup — both end at the same place: every `audio-hooks` subcommand below works identically on Cursor.
+
+### Path A — Cursor + Claude Code (most users)
+
+You already get audio-hooks for free. Cursor 3.2.16+ auto-bridges any Claude Code plugin you have installed (per [cursor.com/docs/reference/third-party-hooks](https://cursor.com/docs/reference/third-party-hooks)). Just install via the Claude Code flow above, enable Cursor Settings → "Third-party skills", then ask your agent:
+
+> **Run `audio-hooks status` and confirm `editor_targets.cursor.state` is `bridged-via-claude-code`.**
+
+8 of 10 hook events bridge to Cursor. `Notification` and `PermissionRequest` are absent because Cursor has no equivalent — that is by Cursor's design, not a project bug. Stop, SubagentStop, PreToolUse, PostToolUse, SessionStart, SessionEnd, PreCompact, and UserPromptSubmit all fire identically across both editors.
+
+To disable bridging entirely, turn off Cursor Settings → "Third-party skills" (this is Cursor's global toggle, not per-plugin).
+
+### Path B — Cursor without Claude Code
+
+Paste this single prompt into Cursor's agent chat:
+
+> **Clone `https://github.com/ChanMeng666/claude-code-audio-hooks` into `~/audio-hooks`, then run `python ~/audio-hooks/bin/audio-hooks install --cursor`. After it succeeds, restart Cursor and run `audio-hooks status` followed by `audio-hooks test all`.**
+
+Cursor's agent runs `git clone`, runs the install (which writes `~/.cursor/hooks.json` and seeds `~/.cursor/audio-hooks-data/user_preferences.json`), then verifies. The install is non-interactive end-to-end — no prompts, no menus, no human in the loop.
+
+`audio-hooks install --cursor` registers 11 Cursor-native event types — the 8 bridgeable ones above plus `subagentStart`, `postToolUseFailure`, and `afterFileEdit` (Cursor-only events that have no Claude Code equivalent and so cannot be bridged from a Claude Code plugin). Each entry is tagged `_managed_by: "audio-hooks"` so uninstall removes only ours and leaves any other Cursor hooks alone.
+
+**Already have Claude Code?** Don't run Path B — `install --cursor` aborts with `DUPLICATE_BRIDGE` to prevent double-firing. Use Path A instead. (`--force` overrides the check if you really want both paths active.)
+
+### Upgrading a Cursor-only install
+
+> **`cd ~/audio-hooks && git pull && python bin/audio-hooks install --cursor`**
+
+Re-running the install is idempotent and preserves `~/.cursor/audio-hooks-data/user_preferences.json` — no data loss, no re-configuration.
+
+### Uninstalling
+
+| Setup | Tell your agent |
+|---|---|
+| Path A (auto-bridge) | *"Uninstall the audio-hooks plugin from Claude Code."* — Cursor stops bridging automatically once the plugin is gone. |
+| Path B (native install) | *"Run `python ~/audio-hooks/bin/audio-hooks uninstall --cursor`."* Pass `--purge` to also delete `~/.cursor/audio-hooks-data/`. |
+
+### Cursor + audio-hooks: natural-language control still works
+
+Once installed (either path), every prompt in *Just Say It* below works on Cursor too. *"Switch the audio theme to chimes"*, *"Snooze audio for an hour"*, *"Enable rate-limit alerts at 80% and 95%"* — same CLI, same JSON, same skill.
 
 ---
 

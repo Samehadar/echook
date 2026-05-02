@@ -273,14 +273,27 @@ audio-hooks logs clear
 | `double-registered` | Both bridge AND native install present — fires audio twice. Run `audio-hooks uninstall --cursor` to fix. |
 | `inactive` | Cursor isn't running this project at all. |
 
-**For users who run Cursor without Claude Code**, install natively:
+**For users who run Cursor without Claude Code**, install natively (clone the repo, then run `install --cursor` from inside it):
 
 ```bash
-audio-hooks install --cursor              # writes ~/.cursor/hooks.json
-audio-hooks install --cursor --force      # override DUPLICATE_BRIDGE check
-audio-hooks uninstall --cursor            # remove (preserves user prefs)
-audio-hooks uninstall --cursor --purge    # also delete ~/.cursor/audio-hooks-data/
+# One-time install
+git clone https://github.com/ChanMeng666/claude-code-audio-hooks ~/audio-hooks
+python ~/audio-hooks/bin/audio-hooks install --cursor       # writes ~/.cursor/hooks.json
+
+# Override DUPLICATE_BRIDGE if Claude Code is also installed (rare; double audio risk)
+python ~/audio-hooks/bin/audio-hooks install --cursor --force
+
+# Upgrade to a newer release — idempotent, preserves user_preferences.json
+cd ~/audio-hooks && git pull && python bin/audio-hooks install --cursor
+
+# Uninstall (preserves preferences for re-install)
+python ~/audio-hooks/bin/audio-hooks uninstall --cursor
+python ~/audio-hooks/bin/audio-hooks uninstall --cursor --purge   # also delete ~/.cursor/audio-hooks-data/
 ```
+
+There is **no `audio-hooks upgrade --cursor` subcommand** — `audio-hooks upgrade` targets Claude Code's plugin cache and intentionally does not touch `~/.cursor/`. For Cursor-only installs, `git pull && install --cursor` is the upgrade recipe.
+
+**Runtime guard for `--force`:** when the install marker records `duplicate_bridge_forced: true` and the runner is invoked under Cursor, the runtime emits a `duplicate_bridge_runtime_skip` warn event (`DUPLICATE_BRIDGE_RUNTIME_SKIP`) and returns 0 — Claude Code's bridge fires alone. Re-enable the native path by `audio-hooks uninstall --cursor` followed by re-install without `--force`.
 
 **Bridge limitations** (these are Cursor's, not ours):
 

@@ -40,7 +40,7 @@ from user_preferences import UserPreferences, get_prefs  # type: ignore  # noqa:
 
 # Version used for auto-sync: when the installed copy in ~/.claude/hooks/
 # detects a newer version in the project directory, it self-updates.
-HOOK_RUNNER_VERSION = "5.1.5"
+HOOK_RUNNER_VERSION = "5.1.6"
 
 # =============================================================================
 # STRUCTURED LOGGING (NDJSON)
@@ -87,6 +87,10 @@ class ErrorCode:
     SELF_UPDATE_FAILED = "SELF_UPDATE_FAILED"
     UNKNOWN_HOOK_TYPE = "UNKNOWN_HOOK_TYPE"
     INTERNAL_ERROR = "INTERNAL_ERROR"
+    # v5.1.6: emitted by run_hook() when invoker == cursor and the install
+    # marker records duplicate_bridge_forced: true. The native Cursor path
+    # silently defers to Claude Code's auto-bridge to prevent double audio.
+    DUPLICATE_BRIDGE_RUNTIME_SKIP = "DUPLICATE_BRIDGE_RUNTIME_SKIP"
 
 
 # Hints and suggested commands for each error code. Used by log_error_event().
@@ -146,6 +150,14 @@ _ERROR_HINTS: Dict[str, Dict[str, str]] = {
     ErrorCode.INTERNAL_ERROR: {
         "hint": "An unexpected internal error occurred.",
         "suggested_command": "audio-hooks logs tail",
+    },
+    ErrorCode.DUPLICATE_BRIDGE_RUNTIME_SKIP: {
+        "hint": (
+            "Cursor-native install was forced over an active Claude Code"
+            " bridge; the runtime is skipping the native firing path so"
+            " Claude Code's bridge handles the event alone."
+        ),
+        "suggested_command": "audio-hooks uninstall --cursor",
     },
 }
 
@@ -234,6 +246,40 @@ def _get_invoker() -> str:
     if _invoker_cache is None:
         _invoker_cache = detect_invoker()
     return _invoker_cache
+
+
+# install_marker.json is written by ``audio-hooks install --cursor`` into the
+# Cursor-native data dir. We read it once per process (None means "not yet
+# attempted"; {} means "attempted, none found or unreadable") so the runtime
+# can detect whether the operator forced a native install on top of an already-
+# active Claude Code bridge — the only way a Cursor session can fire audio
+# twice.
+_install_marker_cache: Optional[Dict[str, Any]] = None
+
+
+def _read_install_marker() -> Dict[str, Any]:
+    """Read ``${data_dir}/install_marker.json`` once per process.
+
+    Returns an empty dict when the file is missing, unreadable, or not JSON.
+    Never raises. The marker is only present after ``audio-hooks install
+    --cursor`` has run (Claude Code's plugin install does not write one), so
+    its absence is the common case and must be silent.
+    """
+    global _install_marker_cache
+    if _install_marker_cache is not None:
+        return _install_marker_cache
+    try:
+        marker_path = _prefs().data_dir / "install_marker.json"
+        if marker_path.exists():
+            with open(marker_path, "r", encoding="utf-8") as fh:
+                data = json.load(fh)
+            if isinstance(data, dict):
+                _install_marker_cache = data
+                return _install_marker_cache
+    except Exception:
+        pass
+    _install_marker_cache = {}
+    return _install_marker_cache
 
 
 def log_event(level: str, action: str, hook: Optional[str] = None, **fields: Any) -> None:
@@ -1905,6 +1951,38 @@ def run_hook(hook_type: str, stdin_data: dict = None) -> int:
               audio_dir=str(AUDIO_DIR),
               queue_dir=str(_prefs().queue_dir),
               synthetic_variant=_current_synthetic_variant)
+
+    # v5.1.6: Cursor bridge invariants. Cursor's third-party-hooks bridge maps
+    # 8 of 10 Claude Code events to Cursor events; ``Notification`` and
+    # ``PermissionRequest`` have no Cursor equivalent (per
+    # cursor.com/docs/reference/third-party-hooks). Cursor never invokes them
+    # under the auto-bridge, but a hand-edited ``~/.cursor/hooks.json`` could,
+    # and a future Cursor release might add equivalents. Skip cleanly so the
+    # behaviour is locked-down and observable in logs.
+    if _get_invoker() == "cursor" and hook_type in ("notification", "permission_request"):
+        log_event("debug", "skipped_no_cursor_equivalent", hook=hook_type)
+        return 0
+
+    # v5.1.6: when ``audio-hooks install --cursor --force`` was used to install
+    # the Cursor-native hooks on top of an already-active Claude Code plugin
+    # bridge, both paths fire on every event and audio plays twice. The marker
+    # file records ``duplicate_bridge_forced: true``; under Cursor we treat it
+    # as a runtime opt-out for the native path so Claude Code's bridge handles
+    # the event alone. Operators who want both paths active should remove the
+    # marker; ``audio-hooks status`` already warns them they are in this state.
+    if _get_invoker() == "cursor" and _read_install_marker().get("duplicate_bridge_forced") is True:
+        meta = _ERROR_HINTS.get(ErrorCode.DUPLICATE_BRIDGE_RUNTIME_SKIP, {})
+        log_event(
+            "warn",
+            "duplicate_bridge_runtime_skip",
+            hook=hook_type,
+            error={
+                "code": ErrorCode.DUPLICATE_BRIDGE_RUNTIME_SKIP,
+                "hint": meta.get("hint", ""),
+                "suggested_command": meta.get("suggested_command", ""),
+            },
+        )
+        return 0
 
     # Check if hook is enabled
     if not is_hook_enabled(hook_type):
