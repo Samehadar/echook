@@ -1,7 +1,7 @@
 {
   "name": "audio-hooks",
-  "version": "5.1.6",
-  "description": "Audio notifications + AI-controlled config for every Claude Code & Cursor IDE event. 26 hooks, native matcher routing, TTS, webhooks, status line, focus flow, rate-limit alerts. Auto-bridges to Cursor IDE 3.2.16+; native install via 'audio-hooks install --cursor'.",
+  "version": "5.2.0",
+  "description": "Audio notifications + AI-controlled config for Claude Code, Cursor IDE, and Codex CLI events. 26 hooks, native matcher routing, TTS, webhooks, status line, focus flow, rate-limit alerts. Auto-bridges to Cursor IDE 3.2.16+; native install via 'audio-hooks install --cursor' or 'audio-hooks install --codex'.",
   "author": {
     "name": "Chan Meng",
     "url": "https://github.com/ChanMeng666"
@@ -9,7 +9,7 @@
   "homepage": "https://github.com/ChanMeng666/claude-code-audio-hooks",
   "repository": "https://github.com/ChanMeng666/claude-code-audio-hooks",
   "license": "MIT",
-  "keywords": ["audio", "notifications", "hooks", "tts", "webhook", "ai-operated", "rate-limits", "cursor", "cursor-ide"],
+  "keywords": ["audio", "notifications", "hooks", "tts", "webhook", "ai-operated", "rate-limits", "cursor", "cursor-ide", "codex", "codex-cli", "openai-codex"],
   "userConfig": {
     "audio_theme": {
       "type": "string",

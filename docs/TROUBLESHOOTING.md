@@ -1,6 +1,6 @@
 # Troubleshooting
 
-> **Version:** 5.1.6 | **Last Updated:** 2026-05-02
+> **Version:** 5.2.0 | **Last Updated:** 2026-05-04
 
 The troubleshooting story is one command:
 
@@ -27,6 +27,7 @@ It returns a JSON document listing the platform, audio player binary, the state 
 | `DUPLICATE_BRIDGE` | `install --cursor` aborted because Claude Code's plugin already auto-bridges to Cursor (would cause double audio) | `audio-hooks uninstall --plugin` first, **or** pass `--force` to `install --cursor` if you want both paths active (rare) |
 | `DUPLICATE_BRIDGE_RUNTIME_SKIP` | Runtime skipped a Cursor invocation because `install_marker.json` records `duplicate_bridge_forced: true` (you ran `install --cursor --force` over an active bridge) | `audio-hooks uninstall --cursor` to remove the native install — Claude Code's bridge then handles Cursor normally |
 | `CURSOR_NOT_FOUND` | `install --cursor` couldn't find `~/.cursor/` | Install Cursor IDE first, then re-run |
+| `CODEX_FEATURE_FLAG_MISSING` | Codex hooks are installed but `[features].codex_hooks = true` is not set in `~/.codex/config.toml`. Codex won't invoke any hooks. | Add `[features]\ncodex_hooks = true` to `~/.codex/config.toml` (or set the flag under the existing `[features]` section). Surfaced by `audio-hooks status` as `editor_targets.codex.warning`. |
 | `INTERNAL_ERROR` | Unexpected internal error | `audio-hooks logs tail --level error --n 50` and report it as a GitHub issue |
 
 ## Symptoms
@@ -203,6 +204,45 @@ If it doesn't:
 2. If the issue persists, refresh the cached plugin code with `audio-hooks upgrade` — it wraps `claude plugin update` (data-preserving) with a fallback to `uninstall --keep-data + install`.
 
 If you're running 5.1.3 or earlier, the runner had a known bug where it fell back to bundled defaults when `CLAUDE_PLUGIN_DATA` wasn't injected (which Cursor does not inject). 5.1.4+ fixed this via the 6-level path-resolution chain in `hooks/user_preferences.py:_resolve_data_dir()`.
+
+### Codex CLI: no audio at all
+
+Run `audio-hooks status` and look at `editor_targets.codex`:
+
+| State | Fix |
+|---|---|
+| `inactive` | The native install isn't in place. Run `audio-hooks install --codex`. |
+| `active-but-flag-disabled` | The install is there but Codex's feature flag isn't enabled. Add `[features]\ncodex_hooks = true` to `~/.codex/config.toml` (use your AI agent's Edit tool — we never auto-edit user TOML), then restart Codex. |
+| `active-but-flag-unknown` | The flag couldn't be parsed (`config.toml` may have a syntax error). Read it and fix the TOML, then ensure `codex_hooks = true` under `[features]`. |
+| `active` | Audio should be working. If it isn't, check `audio-hooks logs tail --level error` and run `audio-hooks diagnose` for player/file issues. |
+
+If you've never installed Codex itself, `~/.codex/` won't exist — install Codex from [openai/codex](https://github.com/openai/codex) first, then re-run `audio-hooks install --codex`.
+
+### Codex CLI: hooks fire but no audio plays
+
+This means Codex IS calling the runner but the runner's playback path is failing. Likely causes:
+
+1. **Audio player not in PATH.** Run `audio-hooks diagnose` — it'll report `AUDIO_PLAYER_NOT_FOUND` if so. Linux: `sudo apt install mpg123`. macOS: `afplay` is built-in. Windows: ensure PowerShell is available.
+2. **Wrong data dir.** If audio plays under Claude Code but not Codex, the runner may be reading the wrong `user_preferences.json`. Run a synthetic Codex hook with debug logging:
+   ```bash
+   echo '{}' | CLAUDE_HOOKS_DEBUG=1 python ~/audio-hooks/hooks/hook_runner.py stop --invoker codex
+   tail -20 ~/.codex/audio-hooks-data/logs/events.ndjson
+   ```
+   Confirm `invoker: "codex"` appears on every event line. If you see `invoker: "unknown"` or `"claude-code"`, the `--invoker codex` flag isn't reaching the runner — re-run `audio-hooks install --codex` to refresh the template substitutions.
+
+### Codex CLI: how do I see which events are firing?
+
+Codex doesn't surface hook activity in its UI by default. Tail the audio-hooks NDJSON log:
+
+```bash
+tail -f ~/.codex/audio-hooks-data/logs/events.ndjson
+```
+
+Each line has `invoker: "codex"`, `hook: "<canonical_name>"`, and `level`. Filter the unsupported-event no-ops with:
+
+```bash
+audio-hooks logs tail --n 50 | grep -v skipped_no_codex_equivalent
+```
 
 ### Webhook not receiving events
 

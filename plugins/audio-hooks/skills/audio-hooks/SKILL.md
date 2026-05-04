@@ -1,6 +1,6 @@
 ---
 name: audio-hooks
-description: Use whenever the user asks to install, configure, uninstall, snooze, mute, test, troubleshoot, or change settings for the claude-code-audio-hooks audio notification system. Trigger phrases include "audio hooks", "audio notifications", "snooze audio", "mute claude", "claude is too loud", "test audio", "switch audio theme", "rate limit alerts", "audio webhook", "TTS", "text to speech", "focus flow", "breathing exercise", "notification mode", "audio only", "notification only", "debounce", "status line", "statusline", "context usage", "context window", "context monitor", "compact reminder", "uninstall audio", "audio status", "audio version", and the slash command /audio-hooks. Also use when diagnosing why Claude Code is silent (or noisy) for the user, or when the user wants to monitor context window usage.
+description: Use whenever the user asks to install, configure, uninstall, snooze, mute, test, troubleshoot, or change settings for the claude-code-audio-hooks audio notification system. Trigger phrases include "audio hooks", "audio notifications", "snooze audio", "mute claude", "claude is too loud", "test audio", "switch audio theme", "rate limit alerts", "audio webhook", "TTS", "text to speech", "focus flow", "breathing exercise", "notification mode", "audio only", "notification only", "debounce", "status line", "statusline", "context usage", "context window", "context monitor", "compact reminder", "uninstall audio", "audio status", "audio version", "install for cursor", "install for codex", "codex audio", "codex hooks", "cursor audio", "cursor hooks", and the slash command /audio-hooks. Also use when diagnosing why Claude Code, Cursor, or Codex is silent (or noisy) for the user, or when the user wants to monitor context window usage.
 ---
 
 # audio-hooks skill
@@ -13,7 +13,7 @@ This plugin is the AI control surface for the claude-code-audio-hooks project. T
 
 **Install / set up the project**
 
-The plugin install (which you are using right now) is the recommended path. If a user is not yet on the plugin, tell them to run `/plugin marketplace add ChanMeng666/claude-code-audio-hooks` and `/plugin install audio-hooks@chanmeng-audio-hooks` inside Claude Code. **Cursor IDE 3.2.16+ users get audio-hooks for free via Cursor's built-in third-party hooks bridge** — no separate Cursor install needed. For users who run Cursor *without* Claude Code, use `audio-hooks install --cursor` (see "Install for Cursor-only users" below). Once installed, verify with:
+The plugin install (which you are using right now) is the recommended path for Claude Code users. If a user is not yet on the plugin, tell them to run `/plugin marketplace add ChanMeng666/claude-code-audio-hooks` and `/plugin install audio-hooks@chanmeng-audio-hooks` inside Claude Code. **Cursor IDE 3.2.16+ users get audio-hooks for free via Cursor's built-in third-party hooks bridge** — no separate Cursor install needed. For users who run Cursor *without* Claude Code, use `audio-hooks install --cursor` (see "Install for Cursor-only users" below). **Codex CLI users** must use `audio-hooks install --codex` — Codex does NOT auto-bridge Claude Code plugins, so the native install is the only path (see "Install for Codex CLI users" below). Once installed, verify with:
 
 ```bash
 audio-hooks status
@@ -304,6 +304,59 @@ There is **no `audio-hooks upgrade --cursor` subcommand** — `audio-hooks upgra
 **Refreshing the cached plugin code Cursor's bridge invokes**: Cursor reads from `~/.claude/plugins/cache/chanmeng-audio-hooks/audio-hooks/<ver>/`, so the user must refresh that cache to pick up new releases. **Use `audio-hooks upgrade`** — it wraps `claude plugin update` (data-preserving) with a fallback to `uninstall --keep-data + install`, so the user's `user_preferences.json` survives. The legacy 5.1.3-era recipe (`/plugin uninstall + /plugin install`) destroys config and should not be recommended.
 
 **Stdin field mapping**: Cursor's `cursor_version`, `conversation_id`, `final_status`, `reason`, `duration_ms`, `is_background_agent`, `workspace_roots`, `model`, `error_message` are surfaced under a `cursor: {...}` sub-object in webhook payloads. `user_email` is **redacted by default**; opt in via `audio-hooks set webhook_settings.include_user_email true`.
+
+## Install for Codex CLI users (5.2.0+)
+
+**OpenAI's Codex CLI does NOT auto-bridge Claude Code plugins** — there's exactly one install path: a native registration at `$CODEX_HOME/hooks.json` (default `~/.codex/hooks.json`). Run `audio-hooks status` and check `editor_targets.codex.state`:
+
+| State | Meaning |
+|---|---|
+| `active` | Installed AND `[features].codex_hooks = true` is set in `~/.codex/config.toml`. Audio fires correctly. |
+| `active-but-flag-disabled` | Installed but the feature flag isn't enabled. **Use your Edit tool to add `[features]\ncodex_hooks = true` to `~/.codex/config.toml`** and tell the user to restart Codex. |
+| `active-but-flag-unknown` | Installed but `~/.codex/config.toml` couldn't be parsed. Investigate the file. |
+| `inactive` | Not installed. Run `audio-hooks install --codex`. |
+
+**For users who want to install audio-hooks for Codex** (paste this single agent prompt — works whether or not they also have Claude Code):
+
+```bash
+git clone https://github.com/ChanMeng666/claude-code-audio-hooks ~/audio-hooks
+python ~/audio-hooks/bin/audio-hooks install --codex
+```
+
+Read the JSON output and act on it:
+
+| `feature_flag_state` | What you do |
+|---|---|
+| `freshly_written` | Nothing more — install authored a fresh `~/.codex/config.toml` with the flag enabled. Tell the user to restart Codex. |
+| `already_enabled` | Nothing more. Tell the user to restart Codex. |
+| `section_missing` | Use your Edit tool to append `[features]\ncodex_hooks = true` to `~/.codex/config.toml`. Then tell the user to restart Codex. |
+| `flag_missing_or_false` | Use your Edit tool to set `codex_hooks = true` under the existing `[features]` section in `~/.codex/config.toml`. Then tell the user to restart Codex. |
+
+**Why we don't auto-edit user-authored `config.toml`:** TOML round-trip with comment preservation is unreliable, and getting it wrong destroys the user's formatting. Letting the AI agent do the targeted edit via its Edit tool keeps the user's file safe.
+
+**Upgrading the Codex install** (idempotent, preserves preferences):
+
+```bash
+cd ~/audio-hooks && git pull && python bin/audio-hooks install --codex
+```
+
+There is **no `audio-hooks upgrade --codex` subcommand** — `audio-hooks upgrade` targets Claude Code's plugin cache. For Codex installs, `git pull && install --codex` is the upgrade recipe.
+
+**Uninstalling**:
+
+```bash
+python ~/audio-hooks/bin/audio-hooks uninstall --codex
+python ~/audio-hooks/bin/audio-hooks uninstall --codex --purge   # also delete ~/.codex/audio-hooks-data/
+```
+
+The uninstall **never touches `~/.codex/config.toml`** — the `codex_hooks` flag may benefit other Codex hook plugins. If the user wants to fully revert, they can remove the flag themselves.
+
+**Codex limitations** (these are Codex's, not ours, per [developers.openai.com/codex/hooks](https://developers.openai.com/codex/hooks)):
+
+- Codex supports 6 hook events: `SessionStart`, `PreToolUse`, `PostToolUse`, `PermissionRequest`, `UserPromptSubmit`, `Stop`. The other 18 audio-hooks canonical events have no Codex equivalent and the runner no-ops them with a `skipped_no_codex_equivalent` debug NDJSON event.
+- Codex's `SessionStart` doesn't support env-output propagation (Cursor's `{"env": {...}}` mechanism). The runtime `_resolve_data_dir()` chain handles this — there's a Codex-gated step at priority 3 that lands at `$CODEX_HOME/audio-hooks-data/` when `detect_invoker() == "codex"`.
+
+**Stdin field mapping**: Codex's stdin uses **the same snake_case schema** as Claude Code (`session_id`, `tool_name`, `hook_event_name`, `transcript_path`, `turn_id`, `tool_use_id`, `tool_response`, `stop_hook_active`, `last_assistant_message`, `source`). No translation layer needed. Codex-specific fields (`turn_id`, `tool_use_id`, `permission_mode`, `tool_response`, `stop_hook_active`) are surfaced under a `codex: {...}` sub-object in webhook payloads (parallel to `cursor: {...}`).
 
 ## Reading the manifest (canonical introspection)
 

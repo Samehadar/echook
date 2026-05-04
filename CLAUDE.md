@@ -1,6 +1,6 @@
 # Claude Code Audio Hooks — AI Operator Guide
 
-> **Version:** 5.1.6 | **Last Updated:** 2026-05-02
+> **Version:** 5.2.0 | **Last Updated:** 2026-05-04
 
 This document is the canonical machine-facing guide for the claude-code-audio-hooks project. It is written for **Claude Code (and other AI agents) as the operator** — not for humans. A human user says "install audio hooks for me" or "snooze audio for an hour" and you do everything via the project's structured CLI without any human-in-the-loop confirmation, menu navigation, or log file reading.
 
@@ -175,6 +175,7 @@ The canonical state is `audio-hooks hooks list`. Always run that for the live va
 | `CLAUDE_AUDIO_HOOKS_PROJECT` | Explicit override for project root. |
 | `CLAUDE_HOOKS_DEBUG` | Set to `1`/`true`/`yes` (case-insensitive) to write debug-level events to the NDJSON log AND dump the latest status line input JSON to `${state_dir}/statusline.last_input.json`. The dump may include workspace paths and the last assistant message — disable when not actively diagnosing. |
 | `CLAUDE_NONINTERACTIVE` | Set to `1` to force scripts into non-interactive mode regardless of TTY detection. |
+| `CODEX_HOME` | Codex CLI home directory (defaults to `~/.codex`). Used by `audio-hooks install --codex` to locate `hooks.json` and `config.toml`, and by the runner to resolve the Codex-native data dir at `$CODEX_HOME/audio-hooks-data/` (gated by `detect_invoker() == "codex"`). |
 
 ## Webhook payload schema (`audio-hooks.webhook.v1`)
 
@@ -303,6 +304,10 @@ After editing any canonical file in `/hooks/`, `/bin/`, `/audio/`, or `/config/`
 | "install for Cursor IDE without Claude Code" | `audio-hooks install --cursor` (writes `~/.cursor/hooks.json`). Aborts with `DUPLICATE_BRIDGE` if Claude Code's plugin is already installed; pass `--force` to override (only do this if you understand the double-fire trade-off). |
 | "uninstall just the Cursor-native install (keep Claude Code)" | `audio-hooks uninstall --cursor`. Preserves `~/.cursor/audio-hooks-data/` so re-install picks up your preferences; pass `--purge` to delete that too. |
 | "silence Cursor only, keep Claude Code working" | If you're on the bridge path (no `~/.cursor/hooks.json`), there is no per-plugin Cursor opt-out — disable Cursor Settings → "Third-party skills" to stop ALL auto-bridging, or uninstall the Claude Code plugin. If you are on a Cursor-native install, run `audio-hooks uninstall --cursor`. |
+| "install audio hooks for codex" / "make codex play sounds" | `audio-hooks install --codex`. Read the JSON output: if `feature_flag_state` is `"freshly_written"` or `"already_enabled"`, you're done — tell the user to restart Codex. If it's `"section_missing"` or `"flag_missing_or_false"`, follow the `next_steps` (use Edit tool to add `[features]\ncodex_hooks = true` to `~/.codex/config.toml`), then tell the user to restart Codex. |
+| "uninstall codex audio hooks" | `audio-hooks uninstall --codex` (keeps state dir for future re-install). Add `--purge` to also remove `~/.codex/audio-hooks-data/`. |
+| "is codex set up for audio?" | `audio-hooks status` — read `editor_targets.codex.state`: `"active"` (installed + flag enabled), `"active-but-flag-disabled"` (installed but flag missing — emit `[features]\ncodex_hooks = true` to ~/.codex/config.toml), `"inactive"` (not installed). |
+| "codex 没有声音" / "为什么 codex 不响" | First `audio-hooks status` and check `editor_targets.codex`. If `state` is `"active-but-flag-disabled"`, edit `~/.codex/config.toml` to add `[features]\ncodex_hooks = true`. If `state` is `"inactive"`, run `audio-hooks install --codex`. |
 
 ## Scripts that exist for legacy human users (you should rarely invoke these)
 
@@ -372,6 +377,57 @@ The install is idempotent (re-running merges the latest template into `~/.cursor
 
 Cursor's `cursor_version`, `conversation_id`, `generation_id`, `reason`, `final_status`, `duration_ms`, `is_background_agent`, `workspace_roots`, `model`, `error_message` are surfaced in webhook payloads under a `cursor: {...}` sub-object. `user_email` is **redacted by default** for privacy; set `webhook_settings.include_user_email = true` to opt in.
 
+## Codex CLI compatibility (5.2.0+)
+
+**OpenAI's Codex CLI does NOT auto-bridge Claude Code plugins** (unlike Cursor). To get audio notifications under Codex, install the native Codex hook with `audio-hooks install --codex`. The install path is single, deterministic, and AI-first: the install command writes everything it can safely write, and emits machine-readable `next_steps` for anything that requires user-config edits, so the calling AI agent (Claude Code, Cursor, or Codex itself) can finish the job without prompting the human.
+
+Codex hook docs: [developers.openai.com/codex/hooks](https://developers.openai.com/codex/hooks).
+
+### Bridge mapping (6 of 26 audio-hooks events)
+
+| audio-hooks canonical | Codex event | Codex matcher | Notes |
+|---|---|---|---|
+| `session_start` | `SessionStart` | `startup\|resume\|clear` | Codex matcher routes to the synthetic variants we already support |
+| `pretooluse` | `PreToolUse` | `Bash\|apply_patch\|mcp__.*` | |
+| `posttooluse` | `PostToolUse` | `Bash\|apply_patch\|mcp__.*` | |
+| `permission_request` | `PermissionRequest` | `Bash\|apply_patch\|mcp__.*` | |
+| `userpromptsubmit` | `UserPromptSubmit` | (no matcher) | |
+| `stop` | `Stop` | (no matcher) | |
+
+The other 18 audio-hooks canonical events (`notification`, `subagent_*`, `precompact`/`postcompact`, `worktree_*`, `elicitation*`, `cwd_changed`, `file_changed`, `task_*`, `teammate_idle`, `config_change`, `instructions_loaded`, `permission_denied`, `session_end`) have no Codex equivalent and the runner no-ops them with a `skipped_no_codex_equivalent` debug NDJSON event when invoked under the codex invoker.
+
+### How install / uninstall work
+
+1. **Install:** `audio-hooks install --codex` reads `codex-hooks/hooks.json`, substitutes `{{PYTHON}}` and `{{HOOK_RUNNER}}` with absolute paths (Windows backslashes JSON-escaped), tags every entry with `_managed_by: "audio-hooks"`, and merges into `$CODEX_HOME/hooks.json` (default `~/.codex/hooks.json`). Existing user-authored entries in that file are preserved by tag.
+2. **Feature flag handling (AI-first):** Codex hooks require `[features]\ncodex_hooks = true` in `$CODEX_HOME/config.toml`. The install command:
+    - **`feature_flag_state: "freshly_written"`** — file didn't exist, install authored it from scratch with the flag enabled.
+    - **`feature_flag_state: "already_enabled"`** — flag was already true, nothing to do.
+    - **`feature_flag_state: "section_missing"` or `"flag_missing_or_false"`** — file exists but flag isn't set; install does NOT touch the user's TOML (formatting/comments would be destroyed) and instead emits a `next_steps` instruction the calling AI agent can follow up on (use the AI's Edit tool to add `codex_hooks = true` under `[features]`).
+3. **Data dir:** state lives at `$CODEX_HOME/audio-hooks-data/` (parallel to Cursor's `~/.cursor/audio-hooks-data/`). The install seeds `user_preferences.json` from `config/default_preferences.json` on first run, then leaves it alone on re-installs.
+4. **Install marker:** `$CODEX_HOME/audio-hooks-data/install_marker.json` records `installed_at`, `version`, `project_dir`, `hook_runner` (absolute path), `python_bin`, `feature_flag_state`, `config_path`. Used by `audio-hooks status` to render `editor_targets.codex.state`.
+5. **Uninstall:** `audio-hooks uninstall --codex` filters out `_managed_by: "audio-hooks"` entries from `$CODEX_HOME/hooks.json`, preserves any user-authored hooks, deletes the file if no foreign content remains, and **never touches `config.toml`** (the `codex_hooks` flag may benefit other Codex hook plugins). `--purge` additionally removes `$CODEX_HOME/audio-hooks-data/`.
+
+### Invoker detection
+
+Codex (per the source code at [openai/codex](https://github.com/openai/codex)) sets no `CODEX_VERSION` env var when invoking hook commands. The Cursor approach (env-var-based detection) does not work for Codex. Instead, the install bakes a `--invoker codex` CLI flag into every command in the template:
+
+```json
+{ "command": "python \"/abs/path/to/hook_runner.py\" stop --invoker codex" }
+```
+
+`detect_invoker()` (now in `hooks/invoker.py`) parses `sys.argv` for this flag before falling back to env-var checks, so the same runner serves Claude Code, Cursor, AND Codex sessions without ambiguity.
+
+### Stdin field mapping
+
+Codex stdin uses **the same snake_case schema** as Claude Code (`session_id`, `tool_name`, `hook_event_name`, `transcript_path`, `turn_id`, `tool_use_id`, `tool_response`, `last_assistant_message`, `stop_hook_active`, `source`). Existing `parse_stdin` handles it natively — no translation layer needed. Codex-specific fields (`turn_id`, `tool_use_id`, `permission_mode`, `tool_response`, `stop_hook_active`) are surfaced in webhook payloads under a `codex: {...}` sub-object (parallel to `cursor: {...}`).
+
+### Limitations vs Claude Code / Cursor
+
+- **No env propagation.** Codex's `SessionStart` doesn't support Cursor's `{"env": {...}}` stdout convention, so we can't inject `CLAUDE_PLUGIN_DATA` into subsequent hooks the way we do for Cursor. The runtime `_resolve_data_dir()` chain is the backstop — it now has a Codex-gated step at priority 3 that lands at `$CODEX_HOME/audio-hooks-data/` when `detect_invoker() == "codex"`.
+- **No `Notification` or `SubagentStop` events.** Codex's hook surface is smaller; the unsupported events are documented in `_unsupported_in_codex` inside the template.
+- **Project-scope install not supported in v1.** `audio-hooks install --codex` writes only `$CODEX_HOME/hooks.json` (user scope). If a user wants per-repo hooks (`<repo>/.codex/hooks.json`), they edit it themselves.
+- **No Codex plugin packaging.** Codex has its own plugin system but we haven't packaged audio-hooks for it; the hooks.json install is enough for v1.
+
 ## Backwards compatibility
 
 - The four pre-v5.0 hooks registered in `~/.claude/settings.json` (`Notification`, `Stop`, `SubagentStop`, `PermissionRequest`) keep working unchanged because the canonical hook names still resolve directly in `hook_runner.main()`. Users upgrading in place don't need to re-run the installer for v5.0 features that don't add new hooks.
@@ -382,6 +438,7 @@ Cursor's `cursor_version`, `conversation_id`, `generation_id`, `reason`, `final_
 
 | Version | Date | Highlights |
 |---|---|---|
+| 5.2.0 | 2026-05-04 | **Codex CLI compatibility.** New native-only install path for OpenAI's Codex CLI: `audio-hooks install --codex` writes `$CODEX_HOME/hooks.json` (default `~/.codex/hooks.json`) registering 6 events (SessionStart, PreToolUse, PostToolUse, PermissionRequest, UserPromptSubmit, Stop — the only events Codex supports per [developers.openai.com/codex/hooks](https://developers.openai.com/codex/hooks)). The remaining 18 audio-hooks canonical events no-op cleanly under the codex invoker with a `skipped_no_codex_equivalent` debug NDJSON event. **AI-first feature flag handling**: install authors a fresh `~/.codex/config.toml` with `[features]\ncodex_hooks = true` when none exists, and emits machine-readable `next_steps` for the calling AI agent to follow up when an existing user-authored config.toml needs an edit (we never round-trip user TOML — formatting/comments would be destroyed). New `hooks/invoker.py` module extracted from `hook_runner.py` so `user_preferences.py` can ask "which IDE/CLI invoked us?" without a circular import. New `--invoker codex` CLI flag baked into the Codex template (Codex sets no env var we could detect by). New `editor_targets.codex` block in `audio-hooks status` reports `active` / `active-but-flag-disabled` / `active-but-flag-unknown` / `inactive`. Webhook payloads gain a `codex: {...}` sub-object surfacing `turn_id`, `tool_use_id`, `permission_mode`, `tool_response`, `stop_hook_active`. 33 new bridge-contract tests in `tests/test_codex_hooks.py` (135 total, all green). No config schema change. |
 | 5.1.6 | 2026-05-02 | **Cursor adaptation hardened.** First-class Cursor install paths in README + INSTALLATION_GUIDE (auto-bridge AND native), marketplace.json + plugin.json now advertise Cursor support (`cursor`/`cursor-ide` keywords). Windows install JSON-escape bug fixed (`D:\github\...` paths previously broke `audio-hooks install --cursor`). Two new runtime guards in `hook_runner.run_hook`: `Notification`/`PermissionRequest` no-op cleanly under Cursor (Cursor has no equivalent events per the bridge docs), and `--force`-installed bridges with `duplicate_bridge_forced: true` in `install_marker.json` runtime-skip with the new `DUPLICATE_BRIDGE_RUNTIME_SKIP` error code so audio fires exactly once. 19 new bridge-contract tests in `tests/test_cursor_bridge.py` (32 total, all green on Linux/Windows/macOS). Cursor-only upgrade recipe documented (`cd ~/audio-hooks && git pull && python bin/audio-hooks install --cursor` — idempotent, preserves prefs). No config schema change — `_version` stays at 5.1.5 so existing user_preferences.json files are untouched on upgrade. |
 | 5.1.5 | 2026-05-01 | **Painless upgrades.** New `UserPreferences` class as single source of truth eliminates the dual-implementation bug. `audio-hooks upgrade` wraps `claude plugin update`/`uninstall+install` with `--keep-data` automatically. Auto-migration on load preserves user values when future versions add new keys. Dual-location backups survive `claude plugin uninstall`. `audio-hooks backup list/show/restore/prune` subcommands. New `config/_defaults_baseline.json` + `tests/test_defaults_stability.py` enforce no-default-flip policy at CI. 5.1.4 default flips for `subagent_stop` / `permission_denied` / `task_created` are reverted. |
 | 5.1.4 | 2026-05-01 | **Cursor IDE compatibility.** Diagnostic and fix: Cursor IDE 3.2.16+ auto-bridges Claude Code plugins (per [cursor.com/docs/reference/third-party-hooks](https://cursor.com/docs/reference/third-party-hooks)) but does NOT inject `CLAUDE_PLUGIN_DATA`, so the runner had been falling back to bundled defaults. New `_resolve_data_dir()` priority chain shares one `user_preferences.json` between Claude Code and Cursor. New `session_start` env-output propagates `CLAUDE_PLUGIN_DATA` to every subsequent Cursor hook. NDJSON events and webhook payloads now carry `invoker` field + `cursor: {...}` sub-object surfacing Cursor stdin fields (with `user_email` redacted by default). New `audio-hooks install --cursor` writes `~/.cursor/hooks.json` for users who run Cursor without Claude Code; aborts with `DUPLICATE_BRIDGE` if the Claude Code plugin is already installed. New `editor_targets` block in `status` / `diagnose` / `manifest` reports per-editor registration state. 13 new unit tests in `tests/test_cursor_bridge.py`. Cursor users must run `/plugin uninstall` + `/plugin install` once to refresh the cached plugin code Cursor's bridge invokes — see CHANGELOG. |

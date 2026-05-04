@@ -1,8 +1,10 @@
 # System Architecture
 
-> **Version:** 5.1.6 | **Last Updated:** 2026-05-02
+> **Version:** 5.2.0 | **Last Updated:** 2026-05-04
 
 This document explains the technical architecture of claude-code-audio-hooks. It is the developer-facing deep dive — for operating the project, see [CLAUDE.md](../CLAUDE.md) (the canonical AI doc) or [README.md](../README.md). For the live machine description of every subcommand and config key, run `audio-hooks manifest`.
+
+> **5.2.0 update:** Codex CLI lands as a third editor target. New `hooks/invoker.py` module extracted from `hook_runner.py` so `user_preferences.py` can ask "which IDE invoked us?" without a circular import. The runner now consumes a `--invoker codex` CLI flag (Codex sets no env var we could detect by, unlike Cursor's `CURSOR_VERSION`); the install template at `codex-hooks/hooks.json` bakes the flag into every command. `_resolve_data_dir()` gains a Codex-gated step at priority 3 (between the env-var overrides and the plugin-cache layout) that lands at `$CODEX_HOME/audio-hooks-data/` when `detect_invoker() == "codex"`. The `run_hook` runtime no-ops the 18 audio-hooks canonical events with no Codex equivalent. AI-first feature-flag handling: install authors a fresh `~/.codex/config.toml` with `[features].codex_hooks = true` when none exists, and emits machine-readable `next_steps` for the calling AI agent to follow up when an existing one needs editing — we never round-trip user-authored TOML.
 
 > **5.1.5 update:** `hooks/user_preferences.py` is now the single source of truth for `user_preferences.json` access. `hook_runner.py` and `bin/audio-hooks.py` consolidated onto it via `get_prefs()` (lazy module-level singleton), eliminating the dual-implementation drift class that produced the 5.1.4 anti-stranding bug. The class owns 6-level path resolution, load with auto-migration (deep-merge missing keys from template; user values win on conflicts), atomic save under cross-platform file lock, and dual-location backups (`<data>/user_preferences.json.bak` for last-good + `~/.claude-audio-hooks-backups/<plugin_id>/<ts>.json` for disaster recovery, kept outside `~/.claude/plugins/data/` so `claude plugin uninstall` cannot wipe them). New `audio-hooks upgrade` and `audio-hooks backup *` subcommands wrap these mechanics for AI operators.
 

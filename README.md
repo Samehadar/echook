@@ -4,13 +4,13 @@
 
 # Claude Code Audio Hooks
 
-**AI-operated audio notification system for Claude Code & Cursor IDE.**<br/>
+**AI-operated audio notification system for Claude Code, Cursor IDE, and Codex CLI.**<br/>
 You type one slash command at install time. Then natural language forever.<br/>
-26 hook events, 2 audio themes, rate-limit alerts, webhooks, TTS, context monitor — all operated by Claude Code on your behalf.<br/>
-**🆕 5.1.6 — Cursor IDE adaptation hardened.** First-class install path for Cursor users (auto-bridge AND native install), Windows install JSON-escape bug fix (paths like `D:\github\...` no longer break `audio-hooks install --cursor`), runtime guards so `Notification`/`PermissionRequest` audio cleanly no-op under Cursor, new `DUPLICATE_BRIDGE_RUNTIME_SKIP` error code, +19 unit tests pinning the bridge contract. See [CHANGELOG](./CHANGELOG.md#516---2026-05-02). 5.1.5's painless-upgrade fixes are still active.
+26 hook events, 2 audio themes, rate-limit alerts, webhooks, TTS, context monitor — all operated by your AI agent on your behalf.<br/>
+**🆕 5.2.0 — Codex CLI compatibility.** New native install path for OpenAI's Codex CLI: `audio-hooks install --codex` writes `~/.codex/hooks.json` registering all 6 events Codex supports (per [developers.openai.com/codex/hooks](https://developers.openai.com/codex/hooks)). AI-first feature-flag handling: install authors a fresh `~/.codex/config.toml` when none exists, emits machine-readable `next_steps` for the calling AI agent to follow up when an existing one needs editing. New `--invoker codex` CLI flag baked into the template, new `editor_targets.codex` block in status, new `codex: {...}` sub-object in webhook payloads, +33 bridge-contract tests. See [CHANGELOG](./CHANGELOG.md#520---2026-05-04). All 5.1.x fixes are still active.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-5.1.6-blue.svg)](https://github.com/ChanMeng666/claude-code-audio-hooks)
+[![Version](https://img.shields.io/badge/version-5.2.0-blue.svg)](https://github.com/ChanMeng666/claude-code-audio-hooks)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-green.svg)](https://github.com/ChanMeng666/claude-code-audio-hooks)
 [![Claude Code](https://img.shields.io/badge/Claude_Code-v2.1.80%2B-brightgreen.svg)](https://claude.ai/download)
 [![Plugin](https://img.shields.io/badge/install-just_talk_to_Claude-purple.svg)](#-install-in-60-seconds)
@@ -223,6 +223,31 @@ Re-running the install is idempotent and preserves `~/.cursor/audio-hooks-data/u
 ### Cursor + audio-hooks: natural-language control still works
 
 Once installed (either path), every prompt in *Just Say It* below works on Cursor too. *"Switch the audio theme to chimes"*, *"Snooze audio for an hour"*, *"Enable rate-limit alerts at 80% and 95%"* — same CLI, same JSON, same skill.
+
+---
+
+## Codex CLI — Native Install
+
+OpenAI's Codex CLI does NOT auto-bridge Claude Code plugins (unlike Cursor), so there's exactly one install path: a native registration at `~/.codex/hooks.json`. The install is fully AI-first — paste this single prompt into Codex (or any AI agent that can run shell commands):
+
+> **Clone `https://github.com/ChanMeng666/claude-code-audio-hooks` into `~/audio-hooks`, then run `python ~/audio-hooks/bin/audio-hooks install --codex`. Read the JSON output: if `feature_flag_state` is `section_missing` or `flag_missing_or_false`, follow the `next_steps` instruction (use your Edit tool to add `[features]\ncodex_hooks = true` to `~/.codex/config.toml`). Then restart Codex and run `audio-hooks status` to confirm `editor_targets.codex.state == "active"`.**
+
+What the install does:
+
+1. Writes `~/.codex/hooks.json` registering the 6 hook events Codex supports (`SessionStart`, `PreToolUse`, `PostToolUse`, `PermissionRequest`, `UserPromptSubmit`, `Stop`) — see [developers.openai.com/codex/hooks](https://developers.openai.com/codex/hooks). Each entry is tagged `_managed_by: "audio-hooks"` so uninstall removes only ours.
+2. Seeds `~/.codex/audio-hooks-data/user_preferences.json` from the project default. Subsequent re-installs preserve this file.
+3. **Handles the feature flag without touching user TOML.** Codex requires `[features]\ncodex_hooks = true` in `~/.codex/config.toml`. If the file doesn't exist, install authors a fresh one with the flag enabled. If the file exists but the flag is missing, install emits a machine-readable `next_steps` instruction so the calling AI agent can add the flag with its Edit tool — we never round-trip the user's TOML, because that destroys comments and formatting.
+4. Writes an install marker at `~/.codex/audio-hooks-data/install_marker.json` so `audio-hooks status` can render `editor_targets.codex.state`.
+
+The 18 audio-hooks canonical events with no Codex equivalent (`Notification`, `SubagentStop`, `PreCompact`, `WorktreeCreate`, `Elicitation`, etc.) no-op cleanly under the codex invoker with a debug NDJSON event — they never block, error, or interfere with Codex's session.
+
+### Uninstalling Codex audio-hooks
+
+> **Run `python ~/audio-hooks/bin/audio-hooks uninstall --codex`.** Pass `--purge` to also delete `~/.codex/audio-hooks-data/`. The uninstall **never touches `~/.codex/config.toml`** — the `codex_hooks` feature flag may benefit other Codex hook plugins.
+
+### Codex + audio-hooks: natural-language control still works
+
+Once installed, every prompt in *Just Say It* below works under Codex too. *"Switch the audio theme to chimes"*, *"Snooze audio for an hour"* — same CLI, same JSON output. Just point your Codex agent at the project root or use `audio-hooks` from PATH.
 
 ---
 

@@ -37,10 +37,11 @@ if _HOOKS_DIR not in sys.path:
     sys.path.insert(0, _HOOKS_DIR)
 
 from user_preferences import UserPreferences, get_prefs  # type: ignore  # noqa: E402
+from invoker import detect_invoker, get_invoker as _get_invoker, strip_invoker_args  # type: ignore  # noqa: E402
 
 # Version used for auto-sync: when the installed copy in ~/.claude/hooks/
 # detects a newer version in the project directory, it self-updates.
-HOOK_RUNNER_VERSION = "5.1.6"
+HOOK_RUNNER_VERSION = "5.2.0"
 
 # =============================================================================
 # STRUCTURED LOGGING (NDJSON)
@@ -162,20 +163,11 @@ _ERROR_HINTS: Dict[str, Dict[str, str]] = {
 }
 
 
-def detect_invoker() -> str:
-    """Return ``"claude-code"`` / ``"cursor"`` / ``"unknown"``.
-
-    Detection uses environment variables (more reliable than parsing stdin):
-      * ``CURSOR_VERSION`` is always set by Cursor when invoking a hook
-        (per cursor.com/docs/hooks reference).
-      * ``CLAUDE_PLUGIN_DATA`` / ``CLAUDE_PLUGIN_ROOT`` are set by Claude Code.
-    Falls back to ``"unknown"`` for direct CLI runs / tests.
-    """
-    if os.environ.get("CURSOR_VERSION"):
-        return "cursor"
-    if os.environ.get("CLAUDE_PLUGIN_DATA") or os.environ.get("CLAUDE_PLUGIN_ROOT"):
-        return "claude-code"
-    return "unknown"
+# detect_invoker / _get_invoker live in invoker.py (imported above) so
+# user_preferences.py can ask the same question without a circular import.
+# When the runner is launched with ``--invoker codex`` (the form Codex's
+# hooks.json template uses), ``detect_invoker`` returns ``"codex"`` from
+# argv parsing before any env-var checks.
 
 
 def _prefs() -> UserPreferences:
@@ -237,15 +229,7 @@ def _set_log_context(session_id: Optional[str], hook_type: Optional[str]) -> Non
     _current_hook_type = hook_type
 
 
-_invoker_cache: Optional[str] = None
-
-
-def _get_invoker() -> str:
-    """Cached wrapper around ``detect_invoker`` for log/webhook callers."""
-    global _invoker_cache
-    if _invoker_cache is None:
-        _invoker_cache = detect_invoker()
-    return _invoker_cache
+# _get_invoker is imported from invoker.py — see import block above.
 
 
 # install_marker.json is written by ``audio-hooks install --cursor`` into the
@@ -1672,6 +1656,18 @@ def send_webhook(hook_type: str, context: str, stdin_data: dict, config: Dict[st
         }
         if include_email and "user_email" in stdin_data:
             cursor_specific["user_email"] = stdin_data["user_email"]
+        # Codex stdin (per developers.openai.com/codex/hooks) carries the same
+        # snake_case shape as Claude Code, plus a few Codex-specifics. Surface
+        # them in their own sub-object so downstream consumers can branch on
+        # `invoker == "codex"` cleanly.
+        codex_specific = {
+            k: stdin_data.get(k)
+            for k in (
+                "turn_id", "tool_use_id", "permission_mode", "tool_response",
+                "stop_hook_active",
+            )
+            if stdin_data.get(k) is not None
+        }
         sanitized_event = {
             k: v for k, v in stdin_data.items()
             if k not in ("transcript_path",)
@@ -1701,6 +1697,7 @@ def send_webhook(hook_type: str, context: str, stdin_data: dict, config: Dict[st
             "tool_name": stdin_data.get("tool_name"),
             "tool_input": stdin_data.get("tool_input"),
             "cursor": cursor_specific or None,
+            "codex": codex_specific or None,
             "event_data": sanitized_event,
         }
     else:
@@ -1963,6 +1960,24 @@ def run_hook(hook_type: str, stdin_data: dict = None) -> int:
         log_event("debug", "skipped_no_cursor_equivalent", hook=hook_type)
         return 0
 
+    # Codex (per developers.openai.com/codex/hooks) only supports 6 events:
+    # SessionStart, PreToolUse, PostToolUse, PermissionRequest, UserPromptSubmit,
+    # Stop. Other audio-hooks canonical events have no Codex equivalent. The
+    # bundled codex-hooks/hooks.json template never registers them, but a
+    # hand-edited ~/.codex/hooks.json could, and a future Codex release might
+    # add equivalents — skip cleanly so the behaviour is locked-down and
+    # observable in the NDJSON log.
+    _CODEX_UNSUPPORTED = {
+        "notification", "subagent_start", "subagent_stop", "session_end",
+        "precompact", "postcompact", "worktree_create", "worktree_remove",
+        "elicitation", "elicitation_result", "cwd_changed", "file_changed",
+        "task_created", "task_completed", "teammate_idle", "config_change",
+        "instructions_loaded", "permission_denied",
+    }
+    if _get_invoker() == "codex" and hook_type in _CODEX_UNSUPPORTED:
+        log_event("debug", "skipped_no_codex_equivalent", hook=hook_type)
+        return 0
+
     # v5.1.6: when ``audio-hooks install --cursor --force`` was used to install
     # the Cursor-native hooks on top of an already-active Claude Code plugin
     # bridge, both paths fire on every event and audio plays twice. The marker
@@ -2115,6 +2130,14 @@ def main() -> int:
     if sys.version_info < (3, 6):
         print("Error: Python 3.6 or higher is required", file=sys.stderr)
         return 1
+
+    # The Codex install template invokes us as `python hook_runner.py <hook> --invoker codex`.
+    # Prime the invoker cache from the original argv BEFORE stripping (otherwise
+    # downstream callers like user_preferences._resolve_data_dir would see a
+    # stripped argv and return "unknown"). Then strip so the rest of this
+    # function can use sys.argv[1] as the hook positional, unchanged.
+    _get_invoker()
+    sys.argv = strip_invoker_args(sys.argv)
 
     if len(sys.argv) < 2:
         print("Usage: python hook_runner.py <hook_type>", file=sys.stderr)

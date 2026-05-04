@@ -27,7 +27,7 @@ if [ "${1:-}" = "--check" ]; then
     CHECK_ONLY=1
 fi
 
-mkdir -p "$PLUGIN/hooks" "$PLUGIN/bin" "$PLUGIN/audio/default" "$PLUGIN/audio/custom" "$PLUGIN/config" "$PLUGIN/cursor-hooks"
+mkdir -p "$PLUGIN/hooks" "$PLUGIN/bin" "$PLUGIN/audio/default" "$PLUGIN/audio/custom" "$PLUGIN/config" "$PLUGIN/cursor-hooks" "$PLUGIN/codex-hooks"
 
 copied=0
 checked=0
@@ -68,6 +68,7 @@ sync_dir() {
 # Canonical files
 sync_file "$REPO/hooks/hook_runner.py"             "$PLUGIN/hooks/hook_runner.py"
 sync_file "$REPO/hooks/user_preferences.py"        "$PLUGIN/hooks/user_preferences.py"
+sync_file "$REPO/hooks/invoker.py"                 "$PLUGIN/hooks/invoker.py"
 sync_file "$REPO/bin/audio-hooks"                  "$PLUGIN/bin/audio-hooks"
 sync_file "$REPO/bin/audio-hooks.py"               "$PLUGIN/bin/audio-hooks.py"
 sync_file "$REPO/bin/audio-hooks.cmd"              "$PLUGIN/bin/audio-hooks.cmd"
@@ -79,6 +80,10 @@ sync_file "$REPO/config/default_preferences.json"  "$PLUGIN/config/default_prefe
 # Cursor IDE hooks template (5.1.4+) — used by `audio-hooks install --cursor`
 # for users who run Cursor without Claude Code.
 sync_file "$REPO/cursor-hooks/hooks.json"          "$PLUGIN/cursor-hooks/hooks.json"
+
+# Codex CLI hooks template — used by `audio-hooks install --codex`
+# for users who run Codex (with or without Claude Code on the same machine).
+sync_file "$REPO/codex-hooks/hooks.json"           "$PLUGIN/codex-hooks/hooks.json"
 
 # Audio assets (both themes)
 sync_dir "$REPO/audio/default" "$PLUGIN/audio/default"

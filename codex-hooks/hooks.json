@@ -1,0 +1,102 @@
+{
+  "_comment": "Codex CLI hooks.json template for audio-hooks. This file is the canonical template; `audio-hooks install --codex` reads it, substitutes {{PYTHON}} and {{HOOK_RUNNER}} with absolute paths, and writes the result into ~/.codex/hooks.json (merging with any existing user hooks). DO NOT edit ~/.codex/hooks.json by hand — re-run install --codex instead.",
+  "_schema_doc": "https://developers.openai.com/codex/hooks",
+  "_audio_hooks_managed": true,
+  "_audio_hooks_version": "5.2.0",
+  "_unsupported_in_codex": [
+    "Notification",
+    "SubagentStart",
+    "SubagentStop",
+    "SessionEnd",
+    "PreCompact",
+    "PostCompact",
+    "WorktreeCreate",
+    "WorktreeRemove",
+    "Elicitation",
+    "ElicitationResult",
+    "CwdChanged",
+    "FileChanged",
+    "TaskCreated",
+    "TaskCompleted",
+    "TeammateIdle",
+    "ConfigChange",
+    "InstructionsLoaded",
+    "PermissionDenied"
+  ],
+  "_unsupported_note": "Codex's hook surface (per developers.openai.com/codex/hooks) covers 6 events: SessionStart, PreToolUse, PostToolUse, PermissionRequest, UserPromptSubmit, Stop. Other audio-hooks canonical events have no Codex equivalent and the runner no-ops them under the codex invoker.",
+  "_feature_flag_required": "Codex requires `[features]\\ncodex_hooks = true` in ~/.codex/config.toml for hooks to fire. The install command writes a fresh config.toml when none exists, otherwise emits next_steps for the calling AI agent to add the flag.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{{PYTHON}} \"{{HOOK_RUNNER}}\" session_start --invoker codex",
+            "timeout": 10,
+            "statusMessage": "audio-hooks: session start"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash|apply_patch|mcp__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{{PYTHON}} \"{{HOOK_RUNNER}}\" pretooluse --invoker codex",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash|apply_patch|mcp__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{{PYTHON}} \"{{HOOK_RUNNER}}\" posttooluse --invoker codex",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "matcher": "Bash|apply_patch|mcp__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{{PYTHON}} \"{{HOOK_RUNNER}}\" permission_request --invoker codex",
+            "timeout": 10,
+            "statusMessage": "audio-hooks: permission request"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{{PYTHON}} \"{{HOOK_RUNNER}}\" userpromptsubmit --invoker codex",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{{PYTHON}} \"{{HOOK_RUNNER}}\" stop --invoker codex",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

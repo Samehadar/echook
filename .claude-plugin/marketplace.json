@@ -5,15 +5,15 @@
     "url": "https://github.com/ChanMeng666"
   },
   "metadata": {
-    "description": "AI-operated audio notification system for Claude Code & Cursor IDE. 26 hooks, native matcher routing, TTS, webhook fan-out, status line, focus flow, rate-limit alerts. Auto-bridges to Cursor IDE 3.2.16+; native install for Cursor-only via 'audio-hooks install --cursor'.",
-    "version": "5.1.6"
+    "description": "AI-operated audio notification system for Claude Code, Cursor IDE & Codex CLI. 26 hooks, native matcher routing, TTS, webhook fan-out, status line, focus flow, rate-limit alerts. Auto-bridges to Cursor 3.2.16+; native install for Cursor-only via 'audio-hooks install --cursor'; native install for Codex via 'audio-hooks install --codex'.",
+    "version": "5.2.0"
   },
   "plugins": [
     {
       "name": "audio-hooks",
       "source": "./plugins/audio-hooks",
-      "version": "5.1.6",
-      "description": "Audio notifications + AI-controlled config for every Claude Code & Cursor IDE event. Auto-bridges to Cursor 3.2.16+; native Cursor install via 'audio-hooks install --cursor'.",
+      "version": "5.2.0",
+      "description": "Audio notifications + AI-controlled config for Claude Code, Cursor IDE, and Codex CLI events. Auto-bridges to Cursor 3.2.16+; native install for Cursor via 'audio-hooks install --cursor' and for Codex via 'audio-hooks install --codex'.",
       "author": {
         "name": "Chan Meng",
         "url": "https://github.com/ChanMeng666"
@@ -21,7 +21,7 @@
       "homepage": "https://github.com/ChanMeng666/claude-code-audio-hooks",
       "repository": "https://github.com/ChanMeng666/claude-code-audio-hooks",
       "license": "MIT",
-      "keywords": ["audio", "notifications", "hooks", "tts", "webhook", "ai-operated", "rate-limits", "status-line", "cursor", "cursor-ide"]
+      "keywords": ["audio", "notifications", "hooks", "tts", "webhook", "ai-operated", "rate-limits", "status-line", "cursor", "cursor-ide", "codex", "codex-cli", "openai-codex"]
     }
   ]
 }

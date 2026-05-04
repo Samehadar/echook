@@ -67,16 +67,47 @@ class UserPreferences:
         return self.data_dir / "logs"
 
     def _resolve_data_dir(self) -> Path:
-        """Six-level priority chain. See spec for rationale."""
+        """Seven-level priority chain. See spec for rationale.
+
+        Priority order:
+          1. ``CLAUDE_PLUGIN_DATA`` env var (set by Claude Code plugin loader)
+          2. ``CLAUDE_AUDIO_HOOKS_DATA`` env var (explicit override)
+          3. **Codex-native dir** at ``$CODEX_HOME/audio-hooks-data/`` —
+             gated by ``detect_invoker() == "codex"``. Sits ahead of the
+             Claude Code shared dir so a developer machine that happens to
+             have both Claude Code and Codex installed still lands at the
+             right dir under Codex sessions.
+          4. Plugin cache dir (when running from plugin layout)
+          5. Shared Claude Code dir at ``~/.claude/plugins/data/<id>/``
+          6. Cursor-native dir at ``~/.cursor/audio-hooks-data/``
+          7. Legacy temp fallback
+        """
         v = os.environ.get("CLAUDE_PLUGIN_DATA")
         if v:
             return Path(v)
         v = os.environ.get("CLAUDE_AUDIO_HOOKS_DATA")
         if v:
             return Path(v)
+        home = Path.home()
+        # Codex-native dir, gated by invoker so we don't hijack Cursor/Claude
+        # Code sessions when only Codex happens to be installed too.
+        # Imported lazily to avoid any chance of an import loop and so this
+        # module stays import-time side-effect-free for non-Codex callers.
+        try:
+            import sys as _sys
+            _hooks_dir = str(Path(__file__).resolve().parent)
+            if _hooks_dir not in _sys.path:
+                _sys.path.insert(0, _hooks_dir)
+            from invoker import get_invoker  # type: ignore
+            if get_invoker() == "codex":
+                codex_home = Path(os.environ.get("CODEX_HOME") or str(home / ".codex"))
+                codex_native = codex_home / "audio-hooks-data"
+                if (codex_native / "user_preferences.json").exists():
+                    return codex_native
+        except Exception:
+            pass
         if self._is_running_from_plugin():
             return self._plugin_cache_data_dir()
-        home = Path.home()
         shared = home / ".claude" / "plugins" / "data" / self.PLUGIN_ID
         if (shared / "user_preferences.json").exists():
             return shared

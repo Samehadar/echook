@@ -50,9 +50,14 @@ def _load_module():
     Each call returns a *fresh* module so module-level cache (``_invoker_cache``)
     is reset between tests. importlib.reload() reuses the same module object,
     which would carry state across tests.
+
+    Also pops ``invoker`` and ``user_preferences`` so their module-level state
+    (notably ``invoker._invoker_cache``) is reloaded fresh — hook_runner now
+    imports detect_invoker from invoker.py, and a stale cache there would
+    bleed across tests in unpredictable ways.
     """
-    # Drop any prior copy from sys.modules so importlib re-executes it.
-    sys.modules.pop("hook_runner", None)
+    for mod_name in ("hook_runner", "invoker", "user_preferences"):
+        sys.modules.pop(mod_name, None)
     spec = importlib.util.spec_from_file_location("hook_runner", HOOK_RUNNER)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
