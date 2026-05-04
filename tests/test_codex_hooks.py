@@ -651,6 +651,89 @@ class TestInstallCodexFeatureFlag(unittest.TestCase):
         self.assertEqual(out["feature_flag_state"], "flag_missing_or_false")
 
 
+class TestFeatureFlagRegexFallback(unittest.TestCase):
+    """Force the ``tomllib`` import to fail so we exercise the Python <3.11
+    regex fallback in ``_check_codex_feature_flag``. CI v5.2.0 caught a bug
+    here: the fallback was returning ``flag_missing_or_false`` for both
+    "no [features] section" and "flag is false", so the AI agent's next_steps
+    instruction was wrong on Python 3.9.
+
+    We invoke the install in a child process with ``-c "import sys;
+    sys.modules['tomllib'] = None; ..."`` so the fallback path runs even on
+    a Python that natively has ``tomllib``.
+    """
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.codex_home = Path(self._tmp.name)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _install_with_tomllib_disabled(self):
+        # Block tomllib at import time so audio-hooks.py falls into the
+        # ImportError branch of _check_codex_feature_flag. The child process
+        # then runs the install command via main().
+        prelude = (
+            "import sys\n"
+            "import importlib.abc, importlib.util\n"
+            "class _Block(importlib.abc.MetaPathFinder):\n"
+            "    def find_spec(self, name, path=None, target=None):\n"
+            "        if name == 'tomllib':\n"
+            "            raise ImportError('blocked for fallback test')\n"
+            "        return None\n"
+            "sys.meta_path.insert(0, _Block())\n"
+            "import importlib.util\n"
+            "spec = importlib.util.spec_from_file_location('audio_hooks_main', %r)\n"
+            "mod = importlib.util.module_from_spec(spec)\n"
+            "spec.loader.exec_module(mod)\n"
+            "raise SystemExit(mod.main([%r, 'install', '--codex']))\n"
+        ) % (str(AUDIO_HOOKS_CLI), str(AUDIO_HOOKS_CLI))
+        env = os.environ.copy()
+        for k in ("CLAUDE_PLUGIN_DATA", "CLAUDE_PLUGIN_ROOT", "CLAUDE_AUDIO_HOOKS_DATA",
+                  "CURSOR_VERSION", "CLAUDE_HOOKS_DEBUG"):
+            env.pop(k, None)
+        env["CODEX_HOME"] = str(self.codex_home)
+        env["PYTHONIOENCODING"] = "utf-8"
+        proc = subprocess.run(
+            [sys.executable, "-c", prelude],
+            capture_output=True, text=True, encoding="utf-8", env=env, timeout=30,
+        )
+        self.assertEqual(proc.returncode, 0, f"install failed: {proc.stderr}")
+        return json.loads(proc.stdout)
+
+    def test_section_missing_under_regex_fallback(self):
+        cfg = self.codex_home / "config.toml"
+        cfg.write_text('model = "gpt-5"\n', encoding="utf-8")
+        out = self._install_with_tomllib_disabled()
+        self.assertEqual(
+            out["feature_flag_state"], "section_missing",
+            "regex fallback must distinguish 'no [features] section' from "
+            "'flag is missing/false' so the AI agent's next_steps is correct",
+        )
+
+    def test_flag_false_under_regex_fallback(self):
+        cfg = self.codex_home / "config.toml"
+        cfg.write_text("[features]\ncodex_hooks = false\n", encoding="utf-8")
+        out = self._install_with_tomllib_disabled()
+        self.assertEqual(out["feature_flag_state"], "flag_missing_or_false")
+
+    def test_flag_true_under_regex_fallback(self):
+        cfg = self.codex_home / "config.toml"
+        cfg.write_text("[features]\ncodex_hooks = true\n", encoding="utf-8")
+        out = self._install_with_tomllib_disabled()
+        self.assertEqual(out["feature_flag_state"], "already_enabled")
+
+    def test_section_present_but_flag_absent_under_regex_fallback(self):
+        # A [features] section that doesn't mention codex_hooks at all should
+        # be reported as "flag missing/false" so the AI is instructed to set
+        # the flag rather than appending a fresh section.
+        cfg = self.codex_home / "config.toml"
+        cfg.write_text("[features]\nsome_other_flag = true\n", encoding="utf-8")
+        out = self._install_with_tomllib_disabled()
+        self.assertEqual(out["feature_flag_state"], "flag_missing_or_false")
+
+
 class TestUninstallCodex(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()

@@ -1458,20 +1458,36 @@ def _check_codex_feature_flag(config_path: Path) -> Dict[str, Any]:
         )
         return result
     except ImportError:
-        # Python < 3.11 fallback: lightweight regex. Looks for an active
-        # `codex_hooks = true` line not commented out.
+        # Python < 3.11 fallback: lightweight regex. Tracks two signals so the
+        # caller can distinguish "no [features] section at all" from "section
+        # exists but flag is missing/false" — the AI agent's `next_steps`
+        # instruction differs (append a new section vs. set the flag inside an
+        # existing section).
+        has_features_section = False
+        flag_enabled = False
         for line in text.splitlines():
             stripped = line.strip()
             if stripped.startswith("#"):
                 continue
+            if re.match(r"^\[features\]\s*$", stripped):
+                has_features_section = True
+                continue
             if re.match(r"^codex_hooks\s*=\s*true\b", stripped, re.IGNORECASE):
-                result["state"] = "already_enabled"
-                result["next_step"] = None
-                return result
+                flag_enabled = True
+        if flag_enabled:
+            result["state"] = "already_enabled"
+            result["next_step"] = None
+            return result
+        if not has_features_section:
+            result["state"] = "section_missing"
+            result["next_step"] = (
+                f"Append the following to {config_path}:\n\n[features]\ncodex_hooks = true\n"
+            )
+            return result
         result["state"] = "flag_missing_or_false"
         result["next_step"] = (
-            f"Append the following to {config_path} (or set under an existing "
-            f"`[features]` section):\n\n[features]\ncodex_hooks = true\n"
+            f"In {config_path}, set `codex_hooks = true` under the existing "
+            f"`[features]` section."
         )
         return result
 
