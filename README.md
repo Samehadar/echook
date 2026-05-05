@@ -27,7 +27,7 @@ You type one slash command at install time. Then natural language forever.<br/>
 
 ### Promotional Video
 
-https://github.com/user-attachments/assets/3504d214-efac-4e01-84c0-426430b842d6
+https://github.com/user-attachments/assets/f57249be-a524-4e6f-8225-6b9500f1aea4
 
 <sup>Built with Remotion, Claude Code, ElevenLabs & Suno. Source: <a href="https://github.com/ChanMeng666/claude-code-audio-hooks-promo-video">claude-code-audio-hooks-promo-video</a></sup>
 
