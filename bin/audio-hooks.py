@@ -2319,7 +2319,7 @@ def _build_manifest() -> Dict[str, Any]:
         "name": "audio-hooks",
         "version": PROJECT_VERSION,
         "schema": "audio-hooks.manifest.v1",
-        "description": "AI-operated audio notification system for Claude Code. Single JSON CLI for every project operation.",
+        "description": "AI-operated audio notification system for Claude Code, Cursor IDE & Codex CLI. Single JSON CLI for every project operation.",
         "subcommands": [
             {"name": "manifest", "args": ["[--schema]"], "description": "Print this manifest, or the user_preferences.json JSON Schema"},
             {"name": "version", "args": [], "description": "Project version + install detection"},

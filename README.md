@@ -10,10 +10,10 @@ You type one slash command at install time. Then natural language forever.<br/>
 **🆕 5.2.0 — Codex CLI compatibility.** New native install path for OpenAI's Codex CLI: `audio-hooks install --codex` writes `~/.codex/hooks.json` registering all 6 events Codex supports (per [developers.openai.com/codex/hooks](https://developers.openai.com/codex/hooks)). AI-first feature-flag handling: install authors a fresh `~/.codex/config.toml` when none exists, emits machine-readable `next_steps` for the calling AI agent to follow up when an existing one needs editing. New `--invoker codex` CLI flag baked into the template, new `editor_targets.codex` block in status, new `codex: {...}` sub-object in webhook payloads, +33 bridge-contract tests. See [CHANGELOG](./CHANGELOG.md#520---2026-05-04). All 5.1.x fixes are still active.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-5.2.0-blue.svg)](https://github.com/ChanMeng666/echook)
+[![Version](https://img.shields.io/badge/version-5.2.1-blue.svg)](https://github.com/ChanMeng666/echook)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-green.svg)](https://github.com/ChanMeng666/echook)
-[![Claude Code](https://img.shields.io/badge/Claude_Code-v2.1.80%2B-brightgreen.svg)](https://claude.ai/download)
-[![Plugin](https://img.shields.io/badge/install-just_talk_to_Claude-purple.svg)](#-install-in-60-seconds)
+[![Editors](https://img.shields.io/badge/editors-Claude_Code_%7C_Cursor_%7C_Codex-brightgreen.svg)](#-pick-your-platform)
+[![Install](https://img.shields.io/badge/install-just_talk_to_your_AI_agent-purple.svg)](#-pick-your-platform)
 
 **Share This Project**
 
@@ -1040,7 +1040,7 @@ This project is licensed under the **MIT License** — see [LICENSE](LICENSE) fo
 [back-to-top]: https://img.shields.io/badge/-BACK_TO_TOP-black?style=flat-square
 
 [share-x-shield]: https://img.shields.io/badge/-Share%20on%20X-black?labelColor=black&logo=x&logoColor=white&style=flat-square
-[share-x-link]: https://x.com/intent/tweet?text=Check%20out%20echook%20-%20AI-operated%20audio%20notifications%20for%20Claude%20Code&url=https%3A%2F%2Fgithub.com%2FChanMeng666%2Fechook
+[share-x-link]: https://x.com/intent/tweet?text=Check%20out%20echook%20-%20AI-operated%20audio%20notifications%20for%20Claude%20Code%2C%20Cursor%20%26%20Codex&url=https%3A%2F%2Fgithub.com%2FChanMeng666%2Fechook
 
 [share-linkedin-shield]: https://img.shields.io/badge/-Share%20on%20LinkedIn-blue?labelColor=blue&logo=linkedin&logoColor=white&style=flat-square
 [share-linkedin-link]: https://www.linkedin.com/sharing/share-offsite/?url=https%3A%2F%2Fgithub.com%2FChanMeng666%2Fechook
@@ -1052,4 +1052,4 @@ This project is licensed under the **MIT License** — see [LICENSE](LICENSE) fo
 [share-telegram-link]: https://t.me/share/url?text=echook%20-%20AI-operated%20audio%20notifications&url=https%3A%2F%2Fgithub.com%2FChanMeng666%2Fechook
 
 [share-whatsapp-shield]: https://img.shields.io/badge/-Share%20on%20WhatsApp-green?labelColor=green&logo=whatsapp&logoColor=white&style=flat-square
-[share-whatsapp-link]: https://api.whatsapp.com/send?text=Check%20out%20echook%20-%20AI-operated%20audio%20notifications%20for%20Claude%20Code%20https%3A%2F%2Fgithub.com%2FChanMeng666%2Fechook
+[share-whatsapp-link]: https://api.whatsapp.com/send?text=Check%20out%20echook%20-%20AI-operated%20audio%20notifications%20for%20Claude%20Code%2C%20Cursor%20%26%20Codex%20https%3A%2F%2Fgithub.com%2FChanMeng666%2Fechook
