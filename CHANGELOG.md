@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.3.0] - 2026-06-22
+
+### Added
+
+- New Claude Code status line segment `cwd` (the 11th segment) that shows the current working directory on Line 1, right after `model`. Helps users running many terminals / Claude Code sessions tell at a glance which project a session belongs to, avoiding cross-project prompt mix-ups. The path is abbreviated for the status bar: the home directory collapses to `~`, and long paths are shortened to `<root>…<last folder>` (e.g. `D:\…\claude-code-audio-hooks`) via the new `_abbrev_path()` helper, which degrades silently on unexpected input.
+- The `cwd` value is read from the stdin `cwd` field Claude Code provides, falling back to `workspace.current_dir` then `workspace.project_dir`.
+- `cwd` is part of the default segment set (shown when `statusline_settings.visible_segments` is empty) and can be toggled individually, e.g. `audio-hooks set statusline_settings.visible_segments '["cwd","context"]'`.
+- Added `tests/test_statusline.py::TestAbbrevPath` and `::TestCwdSegment` covering path abbreviation, the workspace fallback chain, default visibility, and exclusion.
+
+### Documentation
+
+- Updated `SKILL.md`, `docs/ARCHITECTURE.md` (10 → 11 segments), `README.md`, and the `statusline_settings` config comment to document the `cwd` segment.
+
 ## [5.2.2] - 2026-06-12
 
 ### Changed
