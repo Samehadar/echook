@@ -126,6 +126,50 @@ class TestFmtTokens(unittest.TestCase):
         self.assertEqual(self.mod._fmt_tokens(1_234_567), "1.2M")
 
 
+class TestAbbrevPath(unittest.TestCase):
+    """``_abbrev_path`` shortens the cwd for the status line: collapse home to
+    ``~`` and trim long paths to ``<root>…<last folder>``. It must never raise
+    on surprising input — the renderer wraps it but the helper is the contract."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.mod = _load_module()
+
+    def test_short_path_unchanged(self):
+        self.assertEqual(self.mod._abbrev_path("D:\\proj"), "D:\\proj")
+        self.assertEqual(self.mod._abbrev_path("/srv/app"), "/srv/app")
+
+    def test_home_collapses_to_tilde(self):
+        home = os.path.expanduser("~")
+        # A short path under home stays whole but with ~ prefix.
+        self.assertEqual(self.mod._abbrev_path(os.path.join(home, "x")),
+                         "~" + os.sep + "x")
+
+    def test_long_windows_path_keeps_drive_and_last(self):
+        out = self.mod._abbrev_path(
+            "D:\\github_repository\\some\\deeply\\nested\\claude-code-audio-hooks"
+        )
+        self.assertEqual(out, "D:\\…\\claude-code-audio-hooks")
+
+    def test_long_posix_path_keeps_root_and_last(self):
+        out = self.mod._abbrev_path(
+            "/home/someuser/work/repositories/very/deep/echook-project-folder"
+        )
+        # First non-empty segment is "home"; last is the project folder.
+        self.assertEqual(out, "home/…/echook-project-folder")
+
+    def test_extremely_long_last_segment_falls_back(self):
+        # When even "<root>…<tail>" exceeds max_len, drop the root.
+        tail = "a" * 60
+        out = self.mod._abbrev_path("/root/middle/" + tail)
+        self.assertEqual(out, "…/" + tail)
+
+    def test_empty_and_bad_input_never_raise(self):
+        self.assertEqual(self.mod._abbrev_path(""), "")
+        # Non-string input degrades to the original object without raising.
+        self.assertIsNone(self.mod._abbrev_path(None))
+
+
 # ---------------------------------------------------------------------------
 # Integration tests for status line rendering
 # ---------------------------------------------------------------------------
@@ -280,6 +324,61 @@ class TestContextSegment(_StatuslineRenderBase):
         self.assertEqual(rc, 0)
         self.assertIn("(166K/200K)", out)
         self.assertNotIn("(6K/", out)
+
+
+class TestCwdSegment(_StatuslineRenderBase):
+    """The ``cwd`` segment shows the current working directory on Line 1 so the
+    user can tell which project a session belongs to. Shown by default (it is
+    in ALL_SEGMENTS), hidden when ``visible_segments`` excludes it, and silently
+    absent when Claude Code sends no path."""
+
+    FOLDER = "📁"
+
+    def _set_visible(self, segments):
+        status = dict(self._MINIMAL_STATUS)
+        status["statusline"] = {"visible_segments": segments}
+        for sid in ("t", "default"):
+            (self.tmp / f"statusline.cache.{sid}").write_text(
+                json.dumps(status), encoding="utf-8"
+            )
+
+    def test_cwd_shown_by_default(self):
+        payload = {
+            "session_id": "t",
+            "cwd": "D:\\github_repository\\claude-code-audio-hooks",
+        }
+        rc, out, _ = _run(json.dumps(payload), state_dir=self.tmp)
+        self.assertEqual(rc, 0)
+        self.assertIn(self.FOLDER, out)
+        self.assertIn("claude-code-audio-hooks", out)
+
+    def test_cwd_falls_back_to_workspace_current_dir(self):
+        payload = {
+            "session_id": "t",
+            "workspace": {"current_dir": "/srv/myproject"},
+        }
+        rc, out, _ = _run(json.dumps(payload), state_dir=self.tmp)
+        self.assertEqual(rc, 0)
+        self.assertIn(self.FOLDER, out)
+        self.assertIn("myproject", out)
+
+    def test_cwd_hidden_when_excluded(self):
+        self._set_visible(["context"])
+        payload = {
+            "session_id": "t",
+            "cwd": "D:\\github_repository\\claude-code-audio-hooks",
+            "context_window": {"used_percentage": 40, "context_window_size": 200000},
+        }
+        rc, out, _ = _run(json.dumps(payload), state_dir=self.tmp)
+        self.assertEqual(rc, 0)
+        self.assertNotIn(self.FOLDER, out)
+        self.assertIn("Context: 40%", out)
+
+    def test_cwd_absent_when_no_path(self):
+        payload = {"session_id": "t"}
+        rc, out, _ = _run(json.dumps(payload), state_dir=self.tmp)
+        self.assertEqual(rc, 0)
+        self.assertNotIn(self.FOLDER, out)
 
 
 class TestDebugDump(_StatuslineRenderBase):

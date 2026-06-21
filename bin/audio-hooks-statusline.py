@@ -8,8 +8,13 @@ When the array is empty (default) every segment is shown.
 
 Available segments
 ------------------
-Line 1: model, version, sounds, webhook, theme
+Line 1: model, cwd, version, sounds, webhook, theme
 Line 2: snooze, focus, branch, api_quota, context
+
+The ``cwd`` segment shows the current working directory as an abbreviated
+path (home folder collapsed to ``~``; long paths shortened to
+``<root>…<last folder>``) so the user can tell at a glance which project
+the session is in.
 
 Example user configuration (via ``audio-hooks set``):
   audio-hooks set statusline_settings.visible_segments '["context"]'
@@ -49,9 +54,9 @@ RESET = "\033[0m"
 
 CACHE_TTL_SEC = 5
 
-ALL_SEGMENTS = {"model", "version", "sounds", "webhook", "theme",
+ALL_SEGMENTS = {"model", "cwd", "version", "sounds", "webhook", "theme",
                 "snooze", "focus", "branch", "api_quota", "context"}
-LINE1_SEGMENTS = {"model", "version", "sounds", "webhook", "theme"}
+LINE1_SEGMENTS = {"model", "cwd", "version", "sounds", "webhook", "theme"}
 LINE2_SEGMENTS = {"snooze", "focus", "branch", "api_quota", "context"}
 
 # Backwards compatibility: accept old segment names from existing configs
@@ -158,6 +163,39 @@ def _fmt_tokens(n: int) -> str:
     return str(n)
 
 
+def _abbrev_path(cwd: str, max_len: int = 40) -> str:
+    """Render a working-directory path compactly for the status line.
+
+    - Collapse the home directory prefix to ``~`` (case-insensitive compare
+      via ``os.path.normcase`` so it also works on Windows).
+    - If the result is short enough, return it unchanged.
+    - Otherwise keep the first segment (a drive like ``D:`` or ``~``) plus an
+      ellipsis plus the last folder name, e.g. ``D:\\…\\claude-code-audio-hooks``
+      or ``~/…/echook``. If even that is too long, fall back to ``…<sep><last>``.
+
+    Any unexpected input degrades to the original string — the status line
+    must never crash on a surprising ``cwd``.
+    """
+    try:
+        display = cwd
+        home = os.path.expanduser("~")
+        if home and os.path.normcase(cwd).startswith(os.path.normcase(home)):
+            display = "~" + cwd[len(home):]
+        if len(display) <= max_len:
+            return display
+        sep = "\\" if "\\" in display else "/"
+        parts = [seg for seg in display.split(sep) if seg]
+        if not parts:
+            return display
+        head, tail = parts[0], parts[-1]
+        candidate = f"{head}{sep}…{sep}{tail}" if len(parts) > 1 else tail
+        if len(candidate) > max_len:
+            return f"…{sep}{tail}"
+        return candidate
+    except (TypeError, ValueError, AttributeError):
+        return cwd
+
+
 def _maybe_dump_session(session: Dict[str, Any]) -> None:
     """When CLAUDE_HOOKS_DEBUG is enabled, persist the latest session JSON for
     inspection (used to diagnose status line input — e.g. context_window_size
@@ -262,6 +300,14 @@ def main() -> int:
     git_worktree = (session.get("workspace") or {}).get("git_worktree") if isinstance(session.get("workspace"), dict) else None
     ctx_window = session.get("context_window") or {}
 
+    # Current working directory: prefer the top-level `cwd` Claude Code pipes
+    # in, falling back to workspace.current_dir / project_dir.
+    cwd = session.get("cwd")
+    if not (isinstance(cwd, str) and cwd):
+        ws = session.get("workspace") if isinstance(session.get("workspace"), dict) else {}
+        cwd = ws.get("current_dir") or ws.get("project_dir")
+    cwd = cwd if isinstance(cwd, str) and cwd else None
+
     status = _get_status(session_id)
 
     # Determine which segments to show
@@ -292,6 +338,8 @@ def main() -> int:
     l1_parts = []
     if show("model"):
         l1_parts.append(f"{CYAN}[{model}]{RESET}")
+    if show("cwd") and cwd:
+        l1_parts.append(f"\U0001f4c1 {_abbrev_path(cwd)}")
     if show("version"):
         l1_parts.append(f"\U0001f50a echook v{version}")
     if show("sounds"):

@@ -602,7 +602,7 @@ Real-time context window and API quota bars — color-coded warnings before Clau
 </p>
 
 ```text
-[Opus] echook v5.2.2 | 6/26 Sounds | Webhook: ntfy | Theme: Voice
+[Opus] 📁 D:\…\claude-code-audio-hooks | echook v5.2.2 | 6/26 Sounds | Webhook: ntfy | Theme: Voice
 [MUTED 23m]  feat/audio-v5  API Quota: 78%  Context: 65% (130K/200K)  /compact
 ```
 
@@ -615,12 +615,13 @@ Real-time context window and API quota bars — color-coded warnings before Clau
 **Absolute counts (v5.1.3+).** When Claude Code reports the context window size, the segment also shows current/max tokens, e.g. `Context: 83% (166K/200K)`. This makes the math obvious when you `/model`-switch between context-window variants — switching from Opus 4.7 (1M) to Sonnet 4.6 (200K) keeps your tokens identical but shrinks the denominator 5×, so a sudden jump from `17%` to `83%` is **expected**, not a bug. See `docs/TROUBLESHOOTING.md#context-97-or-any-sudden-jump-right-after-switching-models` for the full explanation.
 
 <details>
-<summary><kbd>10 customisable segments</kbd></summary>
+<summary><kbd>11 customisable segments</kbd></summary>
 <br>
 
 | Segment | Shows |
 |---|---|
 | `model` | Model name (e.g. `[Opus]`) |
+| `cwd` | Current working directory (abbreviated path — tells you which project you're in) |
 | `version` | echook version |
 | `sounds` | Enabled sound count |
 | `webhook` | Webhook status |

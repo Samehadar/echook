@@ -131,21 +131,23 @@ The status line displays real-time audio-hooks state and context window usage at
 
 After installing, the status line updates every 60 seconds and shows two lines:
 ```
-[Opus] 🔊 echook v5.1.3 | 6/26 Sounds | Webhook: off | Theme: Voice
+[Opus] 📁 D:\…\claude-code-audio-hooks | 🔊 echook v5.1.3 | 6/26 Sounds | Webhook: off | Theme: Voice
 🌿 main  ████░░░░ API Quota: 60%  █████░░░ Context: 65% (130K/200K) ⚠️ /compact
 ```
+The `📁` segment (`cwd`) shows the current working directory — abbreviated (home → `~`, long paths shortened to `<root>…<last folder>`) — so the user can tell at a glance which project the session is in.
 
 **Customise which status line segments to show**
 
-The status line has 10 segments the user can freely combine. By default all are shown. Set `statusline_settings.visible_segments` to an array of segment names to show only those:
+The status line has 11 segments the user can freely combine. By default all are shown. Set `statusline_settings.visible_segments` to an array of segment names to show only those:
 
-Line 1 segments: `model`, `version`, `sounds`, `webhook`, `theme`
+Line 1 segments: `model`, `cwd`, `version`, `sounds`, `webhook`, `theme`
 Line 2 segments: `snooze`, `focus`, `branch`, `api_quota`, `context`
 
 | User says | Run |
 |---|---|
 | "only show context usage in the status line" | `audio-hooks set statusline_settings.visible_segments '["context"]'` |
 | "show context and API quota only" | `audio-hooks set statusline_settings.visible_segments '["context","api_quota"]'` |
+| "show the current folder and context only" | `audio-hooks set statusline_settings.visible_segments '["cwd","context"]'` |
 | "show context, branch, and model" | `audio-hooks set statusline_settings.visible_segments '["model","context","branch"]'` |
 | "show everything in the status line" (reset) | `audio-hooks set statusline_settings.visible_segments '[]'` |
 | "add webhook to the status line" | Read current with `audio-hooks get statusline_settings.visible_segments`, append `"webhook"` to the array, then set the updated array |

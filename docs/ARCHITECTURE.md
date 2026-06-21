@@ -208,10 +208,10 @@ Native matcher routing happens at the `settings.json` layer (Claude Code's match
 
 ### 4. `bin/audio-hooks-statusline` (Claude Code status line)
 
-Two-line bottom bar registered in `~/.claude/settings.json` via `audio-hooks statusline install`. Reads stdin JSON Claude Code provides (model name, session_id, workspace.git_worktree, rate_limits, context_window) and emits two lines of plain text with ANSI colors:
+Two-line bottom bar registered in `~/.claude/settings.json` via `audio-hooks statusline install`. Reads stdin JSON Claude Code provides (model name, session_id, `cwd` / `workspace.current_dir`, workspace.git_worktree, rate_limits, context_window) and emits two lines of plain text with ANSI colors:
 
 ```text
-[Opus] 🔊 echook v5.1.3 | 6/26 Sounds | Webhook: ntfy | Theme: Voice
+[Opus] 📁 D:\…\claude-code-audio-hooks | 🔊 echook v5.1.3 | 6/26 Sounds | Webhook: ntfy | Theme: Voice
 [MUTED 23m]  🌿 feat/audio-v5  ████░░░░ API Quota: 78%  █████░░░ Context: 65% (130K/200K) ⚠️ /compact
 ```
 
@@ -221,7 +221,7 @@ The API Quota bar uses thresholds GREEN <70%, YELLOW 70-89%, RED ≥90%. The Con
 
 **Diagnostic dump (v5.1.3+).** Setting `CLAUDE_HOOKS_DEBUG=1` (or `true`/`yes`, case-insensitive — matches `hook_runner.DEBUG`) causes the script to atomically write the most recent stdin JSON to `${state_dir}/statusline.last_input.json` via per-PID tempfile + `os.replace`. Used to diagnose what Claude Code is actually piping (e.g. confirming whether `context_window_size` updated after a `/model` change). Privacy note: the dump may include workspace paths, transcript path, and the last assistant message — disable when not actively diagnosing.
 
-Users can customise which segments appear via `statusline_settings.visible_segments` (array of segment names). 10 segments available — Line 1: `model`, `version`, `sounds`, `webhook`, `theme`; Line 2: `snooze`, `focus`, `branch`, `api_quota`, `context`. Empty array (default) shows all. Example: `audio-hooks set statusline_settings.visible_segments '["context","api_quota"]'` shows only the two progress bars.
+Users can customise which segments appear via `statusline_settings.visible_segments` (array of segment names). 11 segments available — Line 1: `model`, `cwd`, `version`, `sounds`, `webhook`, `theme`; Line 2: `snooze`, `focus`, `branch`, `api_quota`, `context`. The `cwd` segment renders the current working directory as an abbreviated path (home → `~`, long paths shortened to `<root>…<last folder>` via `_abbrev_path()`) so the user can tell which project a session is in. Empty array (default) shows all. Example: `audio-hooks set statusline_settings.visible_segments '["context","api_quota"]'` shows only the two progress bars.
 
 `refreshInterval: 60` is set in the registration so snooze countdowns, rate-limit bars, and context usage bars update during idle periods. The script caches `audio-hooks status` for 5 seconds keyed on `session_id` to keep render time <100ms.
 

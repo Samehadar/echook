@@ -144,7 +144,7 @@
   },
 
   "statusline_settings": {
-    "_comment": "Controls which segments appear in the Claude Code status line. Set visible_segments to an array of segment names to show only those. Empty array or omission shows all segments.",
+    "_comment": "Controls which segments appear in the Claude Code status line. Set visible_segments to an array of segment names to show only those. Available: model, cwd, version, sounds, webhook, theme (line 1); snooze, focus, branch, api_quota, context (line 2). Empty array or omission shows all segments.",
     "visible_segments": []
   },
 
