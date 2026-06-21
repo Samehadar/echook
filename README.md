@@ -7,10 +7,14 @@
 **AI-operated audio notification system for Claude Code, Cursor IDE, and Codex CLI.**<br/>
 You type one slash command at install time. Then natural language forever.<br/>
 26 hook events, 2 audio themes, rate-limit alerts, webhooks, TTS, context monitor — all operated by your AI agent on your behalf.<br/>
-**5.2.x — echook rebrand + Codex support.** Renamed from `claude-code-audio-hooks` → **echook** (Echo + Hook, /ˈɛkˌhʊk/) in 5.2.1: now that install paths ship for **Claude Code, Cursor IDE, and Codex**, leading with "Claude Code" in the name was misleading. **Door-only rename, zero migration:** the `audio-hooks` CLI, the `chanmeng-audio-hooks` marketplace name, and all state directories are unchanged — existing installs keep working via GitHub URL redirect. Codex support now includes the Codex plugin path plus the native `audio-hooks install --codex` path, both registering the 10 Codex hook events: `SessionStart`, `PreToolUse`, `PermissionRequest`, `PostToolUse`, `PreCompact`, `PostCompact`, `UserPromptSubmit`, `SubagentStart`, `SubagentStop`, and `Stop`. See [CHANGELOG](./CHANGELOG.md#522---2026-06-12). All 5.1.x fixes still active.
+**5.3.0 — Working-directory status line segment.** The status line now carries an 11th segment, `cwd`, that shows your current working directory on the top line (abbreviated, e.g. `📁 D:\…\echook`). Run many terminals and Claude Code sessions at once? You can tell at a glance which project a session is in — no more firing a project-A prompt inside project-B. On by default, individually toggleable. See the [v5.3.0 release notes](https://github.com/ChanMeng666/echook/releases/tag/v5.3.0).
+
+<sub>**5.2.x — echook rebrand + Codex support.** Renamed from `claude-code-audio-hooks` → **echook** (Echo + Hook, /ˈɛkˌhʊk/) in 5.2.1: now that install paths ship for **Claude Code, Cursor IDE, and Codex**, leading with "Claude Code" in the name was misleading. **Door-only rename, zero migration:** the `audio-hooks` CLI, the `chanmeng-audio-hooks` marketplace name, and all state directories are unchanged — existing installs keep working via GitHub URL redirect. Codex support includes the Codex plugin path plus the native `audio-hooks install --codex` path, both registering the 10 Codex hook events. See [CHANGELOG](./CHANGELOG.md). All 5.1.x fixes still active.</sub>
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-5.2.2-blue.svg)](https://github.com/ChanMeng666/echook)
+[![Latest Release](https://img.shields.io/github/v/release/ChanMeng666/echook?label=release&color=blue&sort=semver)](https://github.com/ChanMeng666/echook/releases/latest)
+[![Release Date](https://img.shields.io/github/release-date/ChanMeng666/echook?label=released&color=blue)](https://github.com/ChanMeng666/echook/releases)
+[![CI](https://img.shields.io/github/actions/workflow/status/ChanMeng666/echook/smoke.yml?branch=master&label=CI)](https://github.com/ChanMeng666/echook/actions/workflows/smoke.yml)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-green.svg)](https://github.com/ChanMeng666/echook)
 [![Editors](https://img.shields.io/badge/editors-Claude_Code_%7C_Cursor_%7C_Codex-brightgreen.svg)](#pick-your-platform)
 [![Install](https://img.shields.io/badge/install-just_talk_to_your_AI_agent-purple.svg)](#pick-your-platform)
@@ -60,7 +64,18 @@ https://github.com/user-attachments/assets/f57249be-a524-4e6f-8225-6b9500f1aea4
 
 ## What's New
 
-The headline 5.2.x callout above covers the echook rebrand + Codex CLI support. The v5.0 redesign — the AI-first foundation that made all of this possible — lives below for reference.
+### v5.3.0 — Working-directory status line segment ([release](https://github.com/ChanMeng666/echook/releases/tag/v5.3.0))
+
+A new status line segment, **`cwd`**, renders your current working directory on Line 1 (right after the model), so anyone juggling many terminals and Claude Code sessions can instantly tell which project a session belongs to.
+
+| What | Detail |
+|---|---|
+| **Abbreviated path** | Home collapses to `~`; long paths shorten to `<root>…<last folder>` (e.g. `D:\…\claude-code-audio-hooks`). Never blows up the bar width. |
+| **Robust source** | Read from stdin `cwd`, falling back to `workspace.current_dir` → `workspace.project_dir`. |
+| **On by default** | Part of the default segment set; toggle freely, e.g. `audio-hooks set statusline_settings.visible_segments '["cwd","context"]'`. |
+| **Tested** | New `TestAbbrevPath` + `TestCwdSegment`; full suite is now **157 tests** green on the Ubuntu/Windows/macOS × Python 3.9/3.12/3.13 matrix. |
+
+The headline 5.2.x callout near the top covers the echook rebrand + Codex CLI support. The v5.0 redesign — the AI-first foundation that made all of this possible — lives below for reference.
 
 <details>
 <summary><kbd>v5.0 — AI-first redesign (click to expand)</kbd></summary>
@@ -117,6 +132,30 @@ See [`CHANGELOG.md`](CHANGELOG.md) for full details.
 ## Pick Your Platform
 
 This is an **AI-first** project. You don't follow install steps yourself — you tell your AI agent (Claude Code, Cursor's agent, or Codex CLI) what to do, in plain English, and it runs every shell command, reads every JSON output, and reports back. Pick your platform:
+
+```mermaid
+flowchart TB
+    REPO["github.com/ChanMeng666/echook<br/>(source + GitHub Releases)"]
+
+    REPO --> CCP["Claude Code<br/>plugin marketplace"]
+    REPO --> CURB["Cursor 3.2.16+<br/>auto-bridge (Path A)"]
+    REPO --> CURN["Cursor native<br/>install --cursor (Path B)"]
+    REPO --> CXP["Codex plugin<br/>marketplace"]
+    REPO --> CXN["Codex native<br/>install --codex"]
+
+    CCP --> CLI["audio-hooks CLI<br/>+ JSON + /audio-hooks SKILL<br/>(identical everywhere)"]
+    CURB --> CLI
+    CURN --> CLI
+    CXP --> CLI
+    CXN --> CLI
+
+    CLI --> OUT["26 hook events · 2 themes · webhooks<br/>TTS · rate-limit alerts · status line"]
+
+    style REPO fill:#4A90E2,color:#fff
+    style CLI fill:#7ED321,color:#000
+    style OUT fill:#F5A623,color:#000
+```
+
 
 | Your editor / CLI | Tell your AI agent | Jump to |
 |---|---|---|
@@ -383,7 +422,7 @@ sequenceDiagram
     You->>CC: Show me the last 20 errors and clear the log.
     CC-->>You: 2 errors found (WEBHOOK_TIMEOUT). Log cleared.
     You->>CC: What version of audio-hooks am I running?
-    CC-->>You: v5.2.2, plugin install.
+    CC-->>You: v5.3.0, plugin install.
     You->>CC: Please uninstall audio-hooks completely.
     CC-->>You: Plugin uninstalled. All hooks removed.
     end
@@ -602,9 +641,30 @@ Real-time context window and API quota bars — color-coded warnings before Clau
 </p>
 
 ```text
-[Opus] 📁 D:\…\claude-code-audio-hooks | echook v5.2.2 | 6/26 Sounds | Webhook: ntfy | Theme: Voice
+[Opus] 📁 D:\…\claude-code-audio-hooks | echook v5.3.0 | 6/26 Sounds | Webhook: ntfy | Theme: Voice
 [MUTED 23m]  feat/audio-v5  API Quota: 78%  Context: 65% (130K/200K)  /compact
 ```
+
+**Status line anatomy** — two lines, 11 freely-combinable segments:
+
+```mermaid
+flowchart LR
+    subgraph L1["Line 1 — identity"]
+        direction LR
+        M["model<br/>[Opus]"] --- CWD["📁 cwd<br/>…/echook"] --- V["version"] --- S["sounds"] --- W["webhook"] --- T["theme"]
+    end
+    subgraph L2["Line 2 — live state"]
+        direction LR
+        SN["snooze"] --- F["focus"] --- B["🌿 branch"] --- AQ["api_quota bar"] --- CX["context bar<br/>+ /compact hint"]
+    end
+    L1 ~~~ L2
+
+    style CWD fill:#7ED321,color:#000
+    style CX fill:#F5A623,color:#000
+    style AQ fill:#F5A623,color:#000
+```
+
+> The green **`cwd`** segment is new in v5.3.0. Read more under [11 customisable segments](#key-features) below.
 
 | Color | Range | Meaning | Action |
 |---|---|---|---|
@@ -939,7 +999,7 @@ echook/
 │   ├── bump-version.sh               # atomic version bump across 8 files
 │   ├── generate-audio.py
 │   └── ...
-├── tests/                            # 147 unittest cases (Cursor + Codex bridge contracts)
+├── tests/                            # 157 unittest cases (Cursor + Codex bridge contracts)
 ├── CLAUDE.md
 ├── README.md
 └── CHANGELOG.md
@@ -951,7 +1011,7 @@ echook/
 2. Run `bash scripts/build-plugin.sh` to sync into plugin layout
 3. CI verifies in-sync via `bash scripts/build-plugin.sh --check`
 4. Validate: `claude plugin validate plugins/audio-hooks`
-5. Test: `python -m unittest discover -v tests` (147 tests; Ubuntu/Windows/macOS × Python 3.9/3.12/3.13 in CI)
+5. Test: `python -m unittest discover -v tests` (157 tests; Ubuntu/Windows/macOS × Python 3.9/3.12/3.13 in CI)
 6. Bump version (when releasing): `bash scripts/bump-version.sh <new_version>` — atomically updates 8 canonical version locations and re-runs `build-plugin.sh`
 
 ### Contributing
@@ -971,6 +1031,8 @@ Pull requests welcome. Fork, clone, make changes to canonical files, run `build-
 | [**docs/TROUBLESHOOTING.md**](docs/TROUBLESHOOTING.md) | Diagnostic recipes for common issues |
 | [**docs/ARCHITECTURE.md**](docs/ARCHITECTURE.md) | System architecture and design decisions |
 | [**CHANGELOG.md**](CHANGELOG.md) | Detailed version history |
+| [**GitHub Releases**](https://github.com/ChanMeng666/echook/releases) | Tagged, versioned distribution — every release from v5.3.0 back, with notes. [Latest release](https://github.com/ChanMeng666/echook/releases/latest). |
+| [**CI (smoke.yml)**](https://github.com/ChanMeng666/echook/actions/workflows/smoke.yml) | Live build status across Ubuntu/Windows/macOS × Python 3.9/3.12/3.13. |
 | `audio-hooks manifest` | Live source of truth — includes `subcommands`, `hooks`, `config_keys`, `error_codes`, `env_vars`, `editor_targets`, `supported_editors`, and `pointers` (paths to every doc above). Always up to date. |
 
 ---

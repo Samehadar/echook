@@ -1,6 +1,6 @@
 # Installation Guide
 
-> **Version:** 5.2.2 | **Last Updated:** 2026-06-12
+> **Version:** 5.3.0 | **Last Updated:** 2026-06-22
 
 The install is two slash commands inside Claude Code. This page is a pointer to the canonical install paths — there are no human-only steps to read through.
 

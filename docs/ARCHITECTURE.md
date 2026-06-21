@@ -1,6 +1,6 @@
 # System Architecture
 
-> **Version:** 5.2.2 | **Last Updated:** 2026-06-12
+> **Version:** 5.3.0 | **Last Updated:** 2026-06-22
 
 This document explains the technical architecture of echook. It is the developer-facing deep dive — for operating the project, see [CLAUDE.md](../CLAUDE.md) (the canonical AI doc) or [README.md](../README.md). For the live machine description of every subcommand and config key, run `audio-hooks manifest`.
 
