@@ -1,0 +1,32 @@
+# echook
+
+> echook is an **AI-agent-first** audio + status-line notification system for Claude Code, Cursor IDE, and Codex CLI. An AI agent (Claude Code / Cursor / Codex) clones, installs, configures, tests, and uninstalls the whole project on the user's behalf — there are no human-interactive menus, no `curl | bash` flows, and nothing to hand-edit. Every capability is a non-interactive `audio-hooks` subcommand that takes and returns JSON.
+
+If you are an AI agent operating this project, do this first:
+
+- Run `audio-hooks manifest` — it returns the live, authoritative list of every subcommand, hook, config key, error code, env var, `editor_targets`, `supported_editors`, and `pointers`. Everything below is orientation; the manifest is source-of-truth.
+- Never hand-edit `config/user_preferences.json`. Use `audio-hooks set <dotted.key> <value>` (validated, JSON result).
+- Verify any change with `audio-hooks status`, `audio-hooks diagnose`, and `audio-hooks test all`.
+
+## Operating the project (AI agent)
+
+- [AI Operator Guide](AGENTS.md): the critical rules — CLI-only interface, manifest-first, two-track scope guard, AI-agent-first (no interactive paths), build-sync after editing canonical sources.
+- [Natural-language → CLI mapping](plugins/audio-hooks/skills/audio-hooks/SKILL.md): the decision tree mapping user requests ("mute claude", "switch theme", "monitor context") to exact `audio-hooks` commands.
+
+## Install (the agent runs these; no human steps except `/reload-plugins`)
+
+- Claude Code (canonical): `claude plugin marketplace add ChanMeng666/echook` then `claude plugin install audio-hooks@chanmeng-audio-hooks`, then ask the user to type `/reload-plugins` (REPL-only).
+- Cursor (without Claude Code): `audio-hooks install --cursor`.
+- Codex (native): `audio-hooks install --codex`.
+- Cloned-repo / non-plugin path: `bash scripts/install-complete.sh` — always non-interactive.
+- [Installation Guide](docs/INSTALLATION_GUIDE.md) · [Troubleshooting (stable error codes)](docs/TROUBLESHOOTING.md)
+
+## Reference
+
+- [Architecture](docs/ARCHITECTURE.md): runner flow, hook surfaces per editor, error-code model, script inventory.
+- [README](README.md): human-readable overview and platform picker.
+- [Changelog](CHANGELOG.md): version history (v6.0.0 = refocus + AI-agent-first hardening).
+
+## Scope (what echook does NOT do)
+
+- echook is two tracks only: audio/notification and the status line. Wellness/breathing, pomodoro/timers, gamification, opening URLs, or running side-commands are out of scope by design — do not add them.

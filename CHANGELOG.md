@@ -9,6 +9,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [6.0.0] - 2026-06-23
+
+Refocus release: echook is now a two-track tool — **audio + out-of-band notification** and the **status line** — and nothing else. Features that distracted the user or sat outside those tracks were removed; the notification features that serve away-from-screen and window-switching users were kept and hardened instead of cut.
+
+### Removed (BREAKING)
+
+- **Focus Flow removed entirely** (`focus_flow.*` config, `scripts/focus-flow.py`, `scripts/focus-flow-tasks/`, the `start_focus_flow`/`stop_focus_flow` lifecycle in `hook_runner.py`, and the `focus` status-line segment). The breathing/hydration/url/command micro-tasks were anti-distraction wellness features outside echook's scope. Existing `focus_flow` keys in a user's `user_preferences.json` are silently ignored by the non-destructive migration — no action needed.
+- **Dead `playback_settings.queue_enabled` / `playback_settings.max_queue_size`** config keys removed. They were never read by the runner. `debounce_ms` is unchanged.
+- The status line now has **10 segments** (was 11); the `focus` segment is gone.
+- **Legacy bash hook runtime removed** — the nine `hooks/*_hook.sh` event scripts and `hooks/shared/hook_logger.sh`. No install path ever registered them: the script tier registers `hook_runner.py` (Python) and the (since-removed) lite tier wrote self-contained inline commands. The bash hooks were only copied as cruft and were a latent security surface (they parsed Claude's hook JSON in shell). `install-complete.sh` no longer copies them, and its self-test now verifies `hook_runner.py`. `uninstall.sh` still removes the old `*_hook.sh` files from `~/.claude` so existing installs clean up fully.
+- **AI-agent-first purge of human-interactive scripts.** Removed the human-only interactive menus and legacy CLI duplicates — `scripts/configure.sh`, `scripts/test-audio.sh`, `scripts/snooze.sh`, `scripts/diagnose.py`, the now-orphaned `hooks/shared/hook_config.sh`, and the `curl | bash` "lite tier" (`scripts/quick-setup.sh`, `scripts/quick-configure.sh`, `scripts/quick-unsetup.sh`). All are fully covered by non-interactive `audio-hooks` subcommands (`set`, `hooks`, `theme`, `test all`, `snooze`, `diagnose`). The obsolete `INTERACTIVE_SCRIPT` error code (only those menus emitted it) is gone; `DUAL_INSTALL_DETECTED` remains and its suggested command is now `audio-hooks uninstall`.
+
+### Fixed
+
+- `install-complete.sh` and `install-windows.ps1` now copy `hook_runner.py`'s sibling modules (`user_preferences.py`, `invoker.py`) alongside it; the full-tier script install previously copied only `hook_runner.py`, which imports both and would fail at runtime without them.
+
+### Changed
+
+- **TTS reply-reading (`speak_assistant_message`) hardened, not removed.** Claude's reply is now routed through a new shared sanitizer before it is spoken: fenced/inline code is replaced with a spoken marker, markdown is stripped, secrets (API keys, tokens, JWTs, `key=value` credentials) are redacted, and truncation lands on a sentence/word boundary instead of mid-word. Away-from-screen users keep their spoken outcome without code or credentials being read aloud.
+- **Verbose desktop notifications (`detail_level: verbose`) hardened, not removed.** Tool commands and reply summaries shown in toasts pass through the same sanitizer, so a verbose toast no longer dumps a raw command or a leaked secret. `file_path` details collapse to a basename. Window-switchers keep the rich glance, safely.
+- **Installers are now always non-interactive.** `install-complete.sh` and `uninstall.sh` no longer have any human prompt or TTY branch — they always run unattended (uninstall preserves config + audio unless `--purge`). The `--yes` flag is accepted as a no-op for backward compatibility. This makes the whole project operable end-to-end by an AI agent with zero human interaction.
+
+### Added
+
+- New `_clean_for_output()` / `_redact_secrets()` helpers in `hooks/hook_runner.py`: a deterministic, offline (no LLM/network) text sanitizer shared by the TTS and verbose-notification paths.
+- `tests/test_sanitize.py` — 17 unit tests covering code stripping, markdown stripping, secret redaction, and boundary truncation. (Previously TTS and verbose notifications had no test coverage.)
+- `llms.txt` — an AI-agent entrypoint at the repo root that orients an LLM/agent to operate the project via the `audio-hooks` CLI (`manifest`-first), complementing the existing `AGENTS.md`.
+
+### Documentation
+
+- Documented the two-track scope guard in `CLAUDE.md` and `SKILL.md` so AI operators decline out-of-scope (wellness/timer/gamification) requests by design.
+
 ## [5.3.0] - 2026-06-22
 
 ### Added

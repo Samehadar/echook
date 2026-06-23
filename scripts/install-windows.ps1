@@ -263,10 +263,14 @@ function Step-InstallHooks {
     }
     Write-Success "Created hooks directory: $HooksDir"
 
-    # Copy hook_runner.py
+    # Copy hook_runner.py and its sibling modules (it imports both at runtime).
     $sourceRunner = Join-Path $ProjectDir "hooks\hook_runner.py"
     $destRunner = Join-Path $HooksDir "hook_runner.py"
     Copy-Item -Path $sourceRunner -Destination $destRunner -Force
+    foreach ($dep in @("user_preferences.py", "invoker.py")) {
+        $depSrc = Join-Path $ProjectDir "hooks\$dep"
+        if (Test-Path $depSrc) { Copy-Item -Path $depSrc -Destination (Join-Path $HooksDir $dep) -Force }
+    }
     Write-Success "Installed hook_runner.py"
 
     # Save project path (Windows format, UTF-8 without BOM)

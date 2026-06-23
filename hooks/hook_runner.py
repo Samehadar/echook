@@ -41,7 +41,7 @@ from invoker import detect_invoker, get_invoker as _get_invoker, strip_invoker_a
 
 # Version used for auto-sync: when the installed copy in ~/.claude/hooks/
 # detects a newer version in the project directory, it self-updates.
-HOOK_RUNNER_VERSION = "5.3.0"
+HOOK_RUNNER_VERSION = "6.0.0"
 
 # =============================================================================
 # STRUCTURED LOGGING (NDJSON)
@@ -1240,6 +1240,78 @@ def _truncate(s: str, max_len: int = 60) -> str:
     return (s[:max_len - 3] + "...") if len(s) > max_len else s
 
 
+# Secret/token patterns redacted before any text is spoken aloud or shown in a
+# desktop toast. Order matters: structured tokens first, then key=value pairs,
+# then long opaque blobs (last, so it doesn't swallow ordinary prose).
+_SECRET_PATTERNS = [
+    re.compile(r"\bsk-[A-Za-z0-9_-]{16,}"),                       # OpenAI-style
+    re.compile(r"\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}"),    # GitHub tokens
+    re.compile(r"\bAKIA[0-9A-Z]{16}\b"),                          # AWS access key id
+    re.compile(r"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+"),  # JWT
+    re.compile(r"\bBearer\s+[A-Za-z0-9._\-]+", re.IGNORECASE),    # bearer header
+    re.compile(r"(?i)\b(password|passwd|token|api[_-]?key|secret|access[_-]?key)\b\s*[=:]\s*\S+"),
+    re.compile(r"\b[A-Fa-f0-9]{32,}\b"),                          # long hex blob
+]
+
+
+def _redact_secrets(s: str) -> str:
+    """Replace anything that looks like a credential with [redacted]."""
+    for pat in _SECRET_PATTERNS:
+        s = pat.sub("[redacted]", s)
+    return s
+
+
+def _clean_for_output(text: str, max_len: int, *, for_speech: bool = False) -> str:
+    """Turn raw model/tool text into a safe, readable one-liner.
+
+    Used by both TTS reply-reading and verbose desktop toasts so neither speaks
+    nor displays code blocks, markdown syntax, or secrets. Deterministic and
+    offline (no LLM/network) — a hook must stay instant.
+
+    Steps: strip fenced/inline code, strip markdown, redact secrets, collapse
+    whitespace, then truncate on a sentence/word boundary (not mid-word).
+    """
+    if not text:
+        return ""
+    s = str(text)
+
+    # 1. Fenced code blocks -> a short marker (do NOT read code aloud / leak it).
+    code_marker = "[code omitted]" if for_speech else "[code]"
+    s = re.sub(r"```.*?```", f" {code_marker} ", s, flags=re.DOTALL)
+    s = re.sub(r"~~~.*?~~~", f" {code_marker} ", s, flags=re.DOTALL)
+    # Inline code -> keep the inner text, drop the backticks.
+    s = re.sub(r"`([^`]*)`", r"\1", s)
+
+    # 2. Redact credentials BEFORE markdown stripping — otherwise the bold/italic
+    #    pass would eat the underscores in tokens like ghp_… and break the match.
+    s = _redact_secrets(s)
+
+    # 3. Markdown syntax.
+    s = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r"\1", s)          # [text](url) -> text
+    if for_speech:
+        s = re.sub(r"https?://\S+", "a link", s)             # bare URLs unspeakable
+    s = re.sub(r"^\s{0,3}#{1,6}\s*", "", s, flags=re.MULTILINE)  # headers
+    s = re.sub(r"^\s*(?:[-*+]|\d+\.)\s+", "", s, flags=re.MULTILINE)  # list markers
+    s = re.sub(r"(\*\*|__|\*|_|~~)", "", s)                   # bold/italic/strike
+
+    # 4. Collapse whitespace.
+    s = re.sub(r"\s+", " ", s).strip()
+    if not s:
+        return ""
+
+    # 5. Boundary truncation.
+    if len(s) <= max_len:
+        return s
+    window = s[:max_len]
+    # Prefer the last sentence end within the window.
+    m = list(re.finditer(r"[.!?](?:\s|$)", window))
+    if m and m[-1].end() >= max_len * 0.5:
+        return window[:m[-1].end()].strip()
+    # Else cut at the last word boundary.
+    cut = window.rsplit(" ", 1)[0].strip() if " " in window else window.strip()
+    return cut + "…"
+
+
 def _get_tool_detail(stdin_data: dict, max_len: int = 60) -> str:
     """Extract a brief detail string from tool_input (command, file_path, etc.)."""
     tool_input = stdin_data.get("tool_input", {})
@@ -1249,7 +1321,12 @@ def _get_tool_detail(stdin_data: dict, max_len: int = 60) -> str:
     for key in ("command", "file_path", "pattern", "query", "url", "prompt"):
         val = tool_input.get(key, "")
         if val:
-            return _truncate(str(val), max_len)
+            # Path-like fields collapse to a basename; everything else is
+            # sanitized (secrets redacted, code/markdown stripped) so a verbose
+            # toast never dumps a raw command or credential.
+            if key == "file_path":
+                return Path(str(val)).name
+            return _clean_for_output(str(val), max_len)
     return ""
 
 
@@ -1289,7 +1366,8 @@ def get_notification_context(hook_type: str, stdin_data: dict, detail_level: str
     if hook_type == "stop":
         last_msg = stdin_data.get("last_assistant_message", "")
         if last_msg and detail_level != "minimal":
-            return f"Task completed: {_truncate(str(last_msg), max(max_len * 2, 80))}"
+            summary = _clean_for_output(str(last_msg), max(max_len * 2, 80))
+            return f"Task completed: {summary}" if summary else "Task completed"
         return "Task completed"
     elif hook_type == "notification":
         msg = stdin_data.get("message", "")
@@ -1322,7 +1400,9 @@ def get_notification_context(hook_type: str, stdin_data: dict, detail_level: str
         last_msg = stdin_data.get("last_assistant_message", "")
         base = "Background task finished" + (f" ({agent})" if agent else "")
         if last_msg and detail_level == "verbose":
-            base += f": {_truncate(str(last_msg), max(max_len * 2, 80))}"
+            summary = _clean_for_output(str(last_msg), max(max_len * 2, 80))
+            if summary:
+                base += f": {summary}"
         return base
     elif hook_type == "session_start":
         source = stdin_data.get("source", "")
@@ -1756,66 +1836,6 @@ def send_webhook(hook_type: str, context: str, stdin_data: dict, config: Dict[st
 
 
 # =============================================================================
-# FOCUS FLOW (MICRO-TASK ANTI-DISTRACTION)
-# =============================================================================
-
-def start_focus_flow(hook_type: str, config: Dict[str, Any]) -> None:
-    """Launch a Focus Flow micro-task when UserPromptSubmit fires.
-
-    Spawns scripts/focus-flow.py in the background, which waits for
-    min_thinking_seconds before starting the task. If Claude finishes
-    before the delay, stop_focus_flow() deletes the marker file and
-    focus-flow.py exits without doing anything.
-    """
-    if hook_type != "userpromptsubmit":
-        return
-
-    ff = config.get("focus_flow", {})
-    if not ff.get("enabled"):
-        return
-
-    mode = ff.get("mode", "breathing")
-    if mode == "disabled":
-        return
-
-    min_seconds = ff.get("min_thinking_seconds", 15)
-    ensure_queue_dir()
-    marker = _prefs().queue_dir / "focus_flow_active"
-
-    # Write marker with timestamp
-    try:
-        marker.write_text(str(time.time()), encoding="utf-8")
-    except OSError:
-        return
-
-    # Launch the delayed micro-task starter
-    launcher = PROJECT_DIR / "scripts" / "focus-flow.py"
-    if not launcher.exists():
-        log_debug(f"Focus Flow: launcher not found at {launcher}")
-        return
-
-    breathing_pattern = ff.get("breathing_pattern", "4-7-8")
-    url = ff.get("url", "")
-    command = ff.get("command", "")
-
-    try:
-        creation_flags = {}
-        if os.name == "nt" and hasattr(subprocess, "CREATE_NO_WINDOW"):
-            creation_flags["creationflags"] = subprocess.CREATE_NO_WINDOW
-
-        subprocess.Popen(
-            [sys.executable, str(launcher), mode, str(min_seconds),
-             str(marker), url, command, breathing_pattern],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            **creation_flags
-        )
-        log_debug(f"Focus Flow: launcher started (mode={mode}, delay={min_seconds}s)")
-    except Exception as e:
-        log_debug(f"Focus Flow: failed to start launcher: {e}")
-
-
-# =============================================================================
 # RATE LIMIT PRE-CHECK (v5.0)
 # =============================================================================
 
@@ -1902,40 +1922,6 @@ def check_rate_limits(stdin_data: Dict[str, Any], config: Dict[str, Any]) -> Non
                       resets_at=resets_int,
                       audio_file=audio_file_name)
             break  # one alert per call
-
-
-def stop_focus_flow() -> None:
-    """Stop any running Focus Flow micro-task when Claude finishes."""
-    ensure_queue_dir()
-    queue_dir = _prefs().queue_dir
-    marker = queue_dir / "focus_flow_active"
-    pid_file = queue_dir / "focus_flow_pid"
-
-    # Kill micro-task process if running
-    if pid_file.exists():
-        try:
-            pid = int(pid_file.read_text(encoding="utf-8").strip())
-            if os.name == "nt":
-                subprocess.run(
-                    ["taskkill", "/F", "/T", "/PID", str(pid)],
-                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-                )
-            else:
-                os.kill(pid, 15)  # SIGTERM
-            log_debug(f"Focus Flow: killed micro-task PID {pid}")
-        except (ValueError, OSError, ProcessLookupError):
-            pass
-        try:
-            pid_file.unlink()
-        except OSError:
-            pass
-
-    # Remove marker (also signals the launcher to exit if still in delay)
-    if marker.exists():
-        try:
-            marker.unlink()
-        except OSError:
-            pass
 
 
 # =============================================================================
@@ -2043,12 +2029,6 @@ def run_hook(hook_type: str, stdin_data: dict = None) -> int:
     # (deferred to after enabled/snoozed/debounced/filtered checks for performance)
     check_and_self_update()
 
-    # Focus Flow: start micro-task on prompt submit, stop on completion
-    if hook_type == "userpromptsubmit":
-        start_focus_flow(hook_type, config)
-    elif hook_type in ("stop", "stop_failure"):
-        stop_focus_flow()
-
     # Determine notification mode with per-hook override support
     notification_settings = config.get("notification_settings", {})
     global_mode = notification_settings.get("mode", "audio_only")
@@ -2121,7 +2101,8 @@ def run_hook(hook_type: str, stdin_data: dict = None) -> int:
             except (TypeError, ValueError):
                 max_chars = 200
             last_msg = (stdin_data or {}).get("last_assistant_message", "") if isinstance(stdin_data, dict) else ""
-            tts_message = _truncate(str(last_msg), max_chars) if last_msg else custom_messages.get(hook_type, context)
+            spoken = _clean_for_output(str(last_msg), max_chars, for_speech=True) if last_msg else ""
+            tts_message = spoken if spoken else custom_messages.get(hook_type, context)
         else:
             tts_message = custom_messages.get(hook_type, context)
         tts_sent = play_tts(tts_message)

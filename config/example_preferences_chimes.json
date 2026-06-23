@@ -24,9 +24,9 @@
   },
   "usage_instructions": [
     "To use chime sounds system-wide:",
-    "1. Copy this entire file content",
-    "2. Paste into config/user_preferences.json",
-    "3. Run: bash scripts/test-audio.sh",
+    "1. Apply with the CLI instead of hand-editing: audio-hooks theme set custom",
+    "2. (Or set individual keys: audio-hooks set <dotted.key> <value>)",
+    "3. Test with: audio-hooks test all",
     "4. Verify chimes play correctly",
     "",
     "Note: You can enable additional hooks by adding them to 'enabled_hooks' array.",

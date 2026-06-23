@@ -25,14 +25,10 @@ else
 fi
 LOG_FILE="$LOG_DIR/claude_hooks_install_$(date +%Y%m%d_%H%M%S).log"
 
-# Non-interactive mode flag.
-# Auto-engages when stdin is not a TTY (piped install, AI agent, CI) or when
-# CLAUDE_NONINTERACTIVE=1 is set. Can also be forced via --yes / --no-prompt.
-if [ ! -t 0 ] || [ -n "${CLAUDE_NONINTERACTIVE:-}" ]; then
-    NON_INTERACTIVE=true
-else
-    NON_INTERACTIVE=false
-fi
+# echook is AI-agent-first: this installer is always non-interactive. It never
+# prompts and is safe to run unattended by an agent or CI. There is no human
+# menu mode.
+NON_INTERACTIVE=true
 
 # Colors
 RED='\033[0;31m'
@@ -334,11 +330,11 @@ step_validate_project() {
         print_error "config/ directory not found"
     fi
 
-    if [ -f "$PROJECT_DIR/hooks/shared/hook_config.sh" ]; then
-        print_success "hook_config.sh found"
+    if [ -f "$PROJECT_DIR/hooks/hook_runner.py" ]; then
+        print_success "hook_runner.py found"
         ((valid+=1))
     else
-        print_error "hook_config.sh not found"
+        print_error "hook_runner.py not found"
     fi
 
     if [ $valid -lt 4 ]; then
@@ -361,8 +357,7 @@ step_install_hooks() {
 
     # Create hooks directory
     mkdir -p ~/.claude/hooks
-    mkdir -p ~/.claude/hooks/shared
-    print_success "Created hooks directories"
+    print_success "Created hooks directory"
 
     # Record project path (use Windows format on Windows for Python compatibility)
     local project_path_to_save
@@ -375,49 +370,15 @@ step_install_hooks() {
     echo "$project_path_to_save" > ~/.claude/hooks/.project_path
     print_success "Recorded project path: $project_path_to_save"
 
-    # Install shared utilities
-    print_info "Installing shared utilities..."
-    cp "$PROJECT_DIR/hooks/shared/path_utils.sh" ~/.claude/hooks/shared/ 2>/dev/null || true
-    cp "$PROJECT_DIR/hooks/shared/hook_config.sh" ~/.claude/hooks/shared/
-    chmod +x ~/.claude/hooks/shared/*.sh
-    print_success "Shared utilities installed"
 
-    # Install Python hook runner (for Windows compatibility)
+    # Install the Python hook runner — this is the registered runtime for the
+    # full tier (settings.json invokes hook_runner.py). Its sibling modules must
+    # ship alongside it (hook_runner.py imports both).
     if [ -f "$PROJECT_DIR/hooks/hook_runner.py" ]; then
         cp "$PROJECT_DIR/hooks/hook_runner.py" ~/.claude/hooks/
+        cp "$PROJECT_DIR/hooks/user_preferences.py" ~/.claude/hooks/ 2>/dev/null || true
+        cp "$PROJECT_DIR/hooks/invoker.py" ~/.claude/hooks/ 2>/dev/null || true
         print_success "Python hook runner installed"
-    fi
-
-    # Install hook scripts
-    print_info "Installing hook scripts..."
-    local installed=0
-    local hooks=(
-        "notification_hook.sh"
-        "stop_hook.sh"
-        "pretooluse_hook.sh"
-        "posttooluse_hook.sh"
-        "userprompt_hook.sh"
-        "subagent_hook.sh"
-        "precompact_hook.sh"
-        "session_start_hook.sh"
-        "session_end_hook.sh"
-    )
-
-    for hook in "${hooks[@]}"; do
-        if [ -f "$PROJECT_DIR/hooks/$hook" ]; then
-            cp "$PROJECT_DIR/hooks/$hook" ~/.claude/hooks/
-            chmod +x ~/.claude/hooks/$hook
-            ((installed+=1))
-            log_silent "  Installed: $hook"
-        else
-            print_warning "Hook not found: $hook"
-        fi
-    done
-
-    print_success "Installed $installed/${#hooks[@]} hook scripts"
-
-    if [ $installed -lt ${#hooks[@]} ]; then
-        print_warning "Some hooks were not installed"
     fi
 }
 
@@ -632,19 +593,13 @@ step_run_tests() {
     local tests_passed=0
     local tests_failed=0
 
-    # Test 1: Check hooks directory
-    print_info "Test 1: Checking hooks directory..."
-    if [ -d ~/.claude/hooks ]; then
-        local hook_count=$(ls -1 ~/.claude/hooks/*_hook.sh 2>/dev/null | wc -l)
-        if [ $hook_count -ge 9 ]; then
-            print_success "Hooks directory: $hook_count scripts installed"
-            ((tests_passed+=1))
-        else
-            print_error "Hooks directory: Only $hook_count/9 scripts found"
-            ((tests_failed+=1))
-        fi
+    # Test 1: Check the Python hook runner is installed (the full-tier runtime)
+    print_info "Test 1: Checking hook runner..."
+    if [ -f ~/.claude/hooks/hook_runner.py ]; then
+        print_success "Hook runner: hook_runner.py installed"
+        ((tests_passed+=1))
     else
-        print_error "Hooks directory not found"
+        print_error "Hook runner not found at ~/.claude/hooks/hook_runner.py"
         ((tests_failed+=1))
     fi
 
@@ -721,38 +676,12 @@ step_run_tests() {
     fi
 }
 
-# Step 10: Offer audio testing
+# Step 10: Audio testing pointer (non-interactive — verification is the agent's job)
 step_offer_audio_test() {
     print_step "Audio Testing"
-
-    # Skip prompt in non-interactive mode
-    if [ "$NON_INTERACTIVE" = true ]; then
-        log ""
-        print_info "Skipping audio test (non-interactive mode)"
-        print_info "You can test audio later with: bash scripts/test-audio.sh"
-        return 0
-    fi
-
     log ""
-    print_info "Would you like to test audio playback now? (y/N)"
-    read -r -t 30 response || response="n"
-
-    case "$response" in
-        [yY][eE][sS]|[yY])
-            log ""
-            print_info "Running audio test..."
-            if [ -f "$PROJECT_DIR/scripts/test-audio.sh" ]; then
-                bash "$PROJECT_DIR/scripts/test-audio.sh"
-            else
-                print_error "test-audio.sh not found"
-                print_info "You can test audio later with: bash scripts/test-audio.sh"
-            fi
-            ;;
-        *)
-            print_info "Skipping audio test"
-            print_info "You can test audio later with: bash scripts/test-audio.sh"
-            ;;
-    esac
+    print_info "Verify playback with the CLI: audio-hooks test all"
+    return 0
 }
 
 # Step 11: Display next steps
@@ -787,50 +716,30 @@ step_next_steps() {
         log ""
         log "  1. ${BOLD}Restart Claude Code${RESET} (settings require restart)"
         log ""
-        log "  2. Test audio playback:"
-        log "     ${CYAN}bash scripts/test-audio.sh${RESET}"
-        log ""
-        log "  3. Test with Claude:"
-        log "     ${CYAN}claude \"What is 2+2?\"${RESET}"
-        log "     (You should hear audio when Claude responds)"
-        log ""
-        log "  4. Configure hooks (optional):"
-        log "     ${CYAN}bash scripts/configure.sh${RESET}"
-        log ""
-        log "  5. Check logs if issues:"
-        if is_windows_env; then
-            log "     ${CYAN}cat \$TEMP/claude_audio_hooks_queue/logs/hook_triggers.log${RESET}"
-        else
-            log "     ${CYAN}cat /tmp/claude_audio_hooks_queue/logs/hook_triggers.log${RESET}"
-        fi
+        log "  2. Verify and operate everything via the CLI (machine-readable JSON):"
+        log "     ${CYAN}audio-hooks status${RESET}      # current config snapshot"
+        log "     ${CYAN}audio-hooks diagnose${RESET}    # system check"
+        log "     ${CYAN}audio-hooks test all${RESET}    # play every enabled sound"
+        log "     ${CYAN}audio-hooks manifest${RESET}    # full capability list for agents"
         log ""
     else
         print_warning "Installation completed with errors"
         log ""
-        log "Troubleshooting:"
+        log "Troubleshooting (all machine-readable JSON):"
         log ""
-        log "  1. Check installation log:"
-        log "     ${CYAN}cat $LOG_FILE${RESET}"
-        log ""
-        log "  2. Re-run the installer:"
-        log "     ${CYAN}bash scripts/install-complete.sh${RESET}"
-        log ""
-        log "  3. Get help:"
-        log "     ${CYAN}https://github.com/ChanMeng666/echook/issues${RESET}"
+        log "  ${CYAN}audio-hooks diagnose${RESET}    # structured system check"
+        log "  ${CYAN}audio-hooks logs tail${RESET}   # recent hook events"
+        log "  Install log:     ${CYAN}$LOG_FILE${RESET}"
         log ""
     fi
 
-    # Show useful commands
+    # Show useful commands — all via the AI-agent-first CLI
     log "Useful Commands:"
     log ""
-    log "  Test audio:      ${CYAN}bash scripts/test-audio.sh${RESET}"
-    log "  Configure:       ${CYAN}bash scripts/configure.sh${RESET}"
-    if is_windows_env; then
-        log "  View triggers:   ${CYAN}cat \$TEMP/claude_audio_hooks_queue/logs/hook_triggers.log${RESET}"
-    else
-        log "  View triggers:   ${CYAN}cat /tmp/claude_audio_hooks_queue/logs/hook_triggers.log${RESET}"
-    fi
-    log "  Uninstall:       ${CYAN}bash scripts/uninstall.sh${RESET}"
+    log "  Status:          ${CYAN}audio-hooks status${RESET}"
+    log "  Configure:       ${CYAN}audio-hooks set <dotted.key> <value>${RESET}"
+    log "  Test audio:      ${CYAN}audio-hooks test all${RESET}"
+    log "  Uninstall:       ${CYAN}audio-hooks uninstall${RESET}"
     log ""
 
     log "Documentation:"

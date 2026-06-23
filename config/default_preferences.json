@@ -90,12 +90,6 @@
   },
 
   "playback_settings": {
-    "_comment_queue": "Enable audio queue to prevent overlapping sounds",
-    "queue_enabled": true,
-
-    "_comment_max_queue": "Maximum number of audio notifications in queue",
-    "max_queue_size": 5,
-
     "_comment_debounce": "Minimum milliseconds between same notification type (prevents spam)",
     "debounce_ms": 500
   },
@@ -104,7 +98,7 @@
     "_comment": "Desktop notification mode: audio_only, notification_only, audio_and_notification, disabled",
     "mode": "audio_and_notification",
     "show_context": true,
-    "_comment_detail": "Notification detail: 'minimal' (hook name only), 'standard' (tool + brief context), 'verbose' (full command text)",
+    "_comment_detail": "Notification detail: 'minimal' (hook name only), 'standard' (tool + brief context), 'verbose' (full sanitized summary — code blocks and secrets auto-stripped)",
     "detail_level": "standard",
     "_comment_per_hook": "Per-hook mode overrides. Omit a hook to use the global mode above.",
     "per_hook": {}
@@ -123,16 +117,6 @@
     "headers": {},
     "_comment_include_user_email": "v5.1.4: When true, include the Cursor IDE user_email field in raw webhook payloads. Default false for privacy — raw webhook URLs may be third-party services.",
     "include_user_email": false
-  },
-
-  "focus_flow": {
-    "_comment": "Micro-task anti-distraction during Claude's thinking time. Modes: breathing, hydration, url, command, disabled",
-    "enabled": false,
-    "mode": "breathing",
-    "min_thinking_seconds": 15,
-    "url": "",
-    "command": "",
-    "breathing_pattern": "4-7-8"
   },
 
   "rate_limit_alerts": {
@@ -183,8 +167,8 @@
     "4. To disable a notification, set its value to false in enabled_hooks",
     "5. To use custom audio, place MP3 files in audio/custom/ and update paths",
     "6. Audio files should be 1-3 seconds long for best experience",
-    "7. Run 'scripts/configure.sh' for interactive configuration",
-    "8. Run 'scripts/test-audio.sh' to test all enabled notifications",
+    "7. Configure everything via the CLI: audio-hooks set <dotted.key> <value> (run 'audio-hooks manifest' for keys)",
+    "8. Test all enabled notifications with: audio-hooks test all",
     "9. notification_settings.mode controls audio vs desktop notifications vs both",
     "10. tts_settings.enabled activates text-to-speech announcements"
   ]

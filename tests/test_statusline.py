@@ -199,7 +199,6 @@ class _StatuslineRenderBase(unittest.TestCase):
         "theme": "default",
         "webhook": {"enabled": False, "format": "raw"},
         "snooze": {"active": False},
-        "focus_flow": {"enabled": False, "mode": None},
         "statusline": {"visible_segments": []},
     }
 

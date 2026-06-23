@@ -77,12 +77,6 @@
   },
 
   "playback_settings": {
-    "_comment_queue": "Enable audio queue to prevent overlapping sounds",
-    "queue_enabled": true,
-
-    "_comment_max_queue": "Maximum number of audio notifications in queue",
-    "max_queue_size": 5,
-
     "_comment_debounce": "Minimum milliseconds between same notification type (prevents spam)",
     "debounce_ms": 500
   },
@@ -91,7 +85,7 @@
     "_comment": "Desktop notification mode: audio_only, notification_only, audio_and_notification, disabled",
     "mode": "audio_only",
     "show_context": true,
-    "_comment_detail": "Notification detail: 'minimal' (hook name only), 'standard' (tool + brief context), 'verbose' (full command text)",
+    "_comment_detail": "Notification detail: 'minimal' (hook name only), 'standard' (tool + brief context), 'verbose' (full sanitized summary — code blocks and secrets auto-stripped)",
     "detail_level": "standard",
     "_comment_per_hook": "Override the global mode for specific hooks. Omit a hook to use the global mode.",
     "per_hook": {
@@ -112,16 +106,6 @@
     "format": "raw",
     "hook_types": ["stop", "notification", "permission_request", "posttoolusefailure", "stop_failure"],
     "headers": {}
-  },
-
-  "focus_flow": {
-    "_comment": "Micro-task anti-distraction during Claude's thinking time. Modes: breathing, hydration, url, command, disabled",
-    "enabled": false,
-    "mode": "breathing",
-    "min_thinking_seconds": 15,
-    "url": "",
-    "command": "",
-    "breathing_pattern": "4-7-8"
   },
 
   "tts_settings": {

@@ -1,8 +1,8 @@
 # Installation Guide
 
-> **Version:** 5.3.0 | **Last Updated:** 2026-06-22
+> **Version:** 6.0.0 | **Last Updated:** 2026-06-23
 
-The install is two slash commands inside Claude Code. This page is a pointer to the canonical install paths — there are no human-only steps to read through.
+**echook is AI-agent-first.** A human doesn't follow these steps — your AI agent (Claude Code, Cursor, or Codex) does. Point it at this repo and ask it to install/configure/uninstall; it runs every command below and reports back. This page documents the full pull → install → configure → verify → uninstall flow so the agent (and a curious human) can see exactly what happens. There are no interactive prompts and no human-only steps — the one exception is Claude Code's `/reload-plugins`, which has no CLI equivalent.
 
 > **Upgrading from 5.1.4 or earlier?** Don't `/plugin uninstall + install` manually — that destroys your `user_preferences.json`. Run `audio-hooks upgrade` instead. It auto-detects the install scope, tries `claude plugin update` (data-preserving) first, and falls back to `uninstall --keep-data + install` if needed. Migration on next load merges any new template keys into your config without overwriting your customizations. Disaster recovery: `audio-hooks backup list` / `audio-hooks backup restore latest-external`.
 
@@ -24,9 +24,9 @@ Then verify and smoke-test:
 
 That's it. All 26 hook events register, every audio file is bundled, and `${CLAUDE_PLUGIN_DATA}/user_preferences.json` is auto-initialised on first read. The `/audio-hooks` SKILL ships with the plugin so you can configure everything via natural language afterwards.
 
-## Alternative: legacy script install
+## Alternative: script install (cloned repo, no plugin system)
 
-For users who'd rather not use the plugin system:
+For setups that don't use the plugin system — your agent runs this:
 
 ```bash
 git clone https://github.com/ChanMeng666/echook.git
@@ -34,7 +34,7 @@ cd echook
 bash scripts/install-complete.sh
 ```
 
-The installer auto-engages non-interactive mode when stdin is not a TTY or `CLAUDE_NONINTERACTIVE=1` is set, so AI agents and CI can run it without prompts. For Windows native (PowerShell), use `.\scripts\install-windows.ps1`.
+The installer is **always non-interactive** — it never prompts, so AI agents and CI run it unattended. It registers `hook_runner.py` in `~/.claude/settings.json`. For Windows native (PowerShell), use `.\scripts\install-windows.ps1`. Uninstall with `audio-hooks uninstall` (add `--purge` to also remove config + audio).
 
 **Don't enable both paths** — they fire on every event independently and you'll hear double audio. `audio-hooks diagnose` reports `DUAL_INSTALL_DETECTED` if it finds both and tells you exactly how to fix it.
 
@@ -143,36 +143,14 @@ python ~/audio-hooks/bin/audio-hooks uninstall --codex
 
 Removes only entries tagged `_managed_by: "audio-hooks"` from `~/.codex/hooks.json`. Preserves `~/.codex/audio-hooks-data/user_preferences.json`. Pass `--purge` to also delete that directory. **Never touches `~/.codex/config.toml`**.
 
-## Lite tier (zero-dependency, no Python)
-
-For users who want only desktop notifications + system sounds (no MP3s, no TTS, no webhooks):
-
-```bash
-curl -sL https://raw.githubusercontent.com/ChanMeng666/echook/master/scripts/quick-setup.sh | bash
-```
-
-Customise enabled hooks without cloning:
-
-```bash
-curl -sL .../quick-configure.sh | bash -s -- --list
-curl -sL .../quick-configure.sh | bash -s -- --disable SubagentStop
-curl -sL .../quick-configure.sh | bash -s -- --only Stop Notification
-```
-
-Uninstall:
-
-```bash
-curl -sL .../quick-unsetup.sh | bash
-```
-
 ## Prerequisites
 
-| Requirement | Plugin install | Script install | Lite tier |
-|---|---|---|---|
-| Claude Code v2.1.80+ | ✓ | ✓ | ✓ |
-| Python 3.6+ | ✓ (auto-detected, prefers `python3` then `python` then `py`) | ✓ | — |
-| PowerShell (Windows) | ✓ (for audio playback) | ✓ | ✓ |
-| `mpg123` / `ffplay` / `paplay` / `aplay` (Linux) | one of these | one of these | — |
+| Requirement | Plugin install | Script install |
+|---|---|---|
+| Claude Code v2.1.80+ | ✓ | ✓ |
+| Python 3.6+ | ✓ (auto-detected, prefers `python3` then `python` then `py`) | ✓ |
+| PowerShell (Windows) | ✓ (for audio playback) | ✓ |
+| `mpg123` / `ffplay` / `paplay` / `aplay` (Linux) | one of these | one of these |
 
 ## Verifying your install
 

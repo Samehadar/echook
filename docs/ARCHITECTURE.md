@@ -1,6 +1,6 @@
 # System Architecture
 
-> **Version:** 5.3.0 | **Last Updated:** 2026-06-22
+> **Version:** 6.0.0 | **Last Updated:** 2026-06-23
 
 This document explains the technical architecture of echook. It is the developer-facing deep dive — for operating the project, see [CLAUDE.md](../CLAUDE.md) (the canonical AI doc) or [README.md](../README.md). For the live machine description of every subcommand and config key, run `audio-hooks manifest`.
 
@@ -12,7 +12,7 @@ This document explains the technical architecture of echook. It is the developer
 
 The project is **AI-operated**, not human-operated:
 
-1. **No interactive CLI prompts.** All scripts auto-engage non-interactive mode on non-TTY or when `CLAUDE_NONINTERACTIVE=1` is set.
+1. **No interactive CLI prompts, ever.** Every script is unconditionally non-interactive — no `read -p`, no menus, no TTY branching. The human-only menu scripts and `curl | bash` flows were removed in v6.0.0.
 2. **No human-readable error logs.** All logs are NDJSON (`audio-hooks.v1` schema) with stable `code` enums and machine-actionable `hint` + `suggested_command` fields.
 3. **No GUIs.**
 4. **No 2FA / CAPTCHA gates.**
@@ -33,7 +33,7 @@ flowchart LR
 
     HR -->|reads| RL[rate-limit pre-check<br/>marker debounce]
     HR -->|reads| CFG[user_preferences.json]
-    HR -->|reads| MARK[snooze + focus-flow markers]
+    HR -->|reads| MARK[snooze markers]
 
     HR -->|fires| AUDIO[Audio playback<br/>26 MP3s, 2 themes]
     HR -->|fires| NOTIF[Desktop notification]
@@ -78,8 +78,7 @@ flowchart TD
     DEB -->|no| FILTER{should_filter?<br/>user regex on stdin fields}
     FILTER -->|yes, exclude| EXIT
     FILTER -->|no| AUDIT[check_and_self_update]
-    AUDIT --> FF[Focus Flow start/stop]
-    FF --> CTX[get_notification_context<br/>+ universal suffix]
+    AUDIT --> CTX[get_notification_context<br/>+ _clean_for_output sanitizer]
     CTX --> AUDIO{mode=audio*?}
     AUDIO -->|yes| PLAY[play_audio]
     PLAY --> NOTIF{mode=notif*?}
@@ -221,26 +220,31 @@ The API Quota bar uses thresholds GREEN <70%, YELLOW 70-89%, RED ≥90%. The Con
 
 **Diagnostic dump (v5.1.3+).** Setting `CLAUDE_HOOKS_DEBUG=1` (or `true`/`yes`, case-insensitive — matches `hook_runner.DEBUG`) causes the script to atomically write the most recent stdin JSON to `${state_dir}/statusline.last_input.json` via per-PID tempfile + `os.replace`. Used to diagnose what Claude Code is actually piping (e.g. confirming whether `context_window_size` updated after a `/model` change). Privacy note: the dump may include workspace paths, transcript path, and the last assistant message — disable when not actively diagnosing.
 
-Users can customise which segments appear via `statusline_settings.visible_segments` (array of segment names). 11 segments available — Line 1: `model`, `cwd`, `version`, `sounds`, `webhook`, `theme`; Line 2: `snooze`, `focus`, `branch`, `api_quota`, `context`. The `cwd` segment renders the current working directory as an abbreviated path (home → `~`, long paths shortened to `<root>…<last folder>` via `_abbrev_path()`) so the user can tell which project a session is in. Empty array (default) shows all. Example: `audio-hooks set statusline_settings.visible_segments '["context","api_quota"]'` shows only the two progress bars.
+Users can customise which segments appear via `statusline_settings.visible_segments` (array of segment names). 10 segments available — Line 1: `model`, `cwd`, `version`, `sounds`, `webhook`, `theme`; Line 2: `snooze`, `branch`, `api_quota`, `context`. The `cwd` segment renders the current working directory as an abbreviated path (home → `~`, long paths shortened to `<root>…<last folder>` via `_abbrev_path()`) so the user can tell which project a session is in. Empty array (default) shows all. Example: `audio-hooks set statusline_settings.visible_segments '["context","api_quota"]'` shows only the two progress bars.
 
 `refreshInterval: 60` is set in the registration so snooze countdowns, rate-limit bars, and context usage bars update during idle periods. The script caches `audio-hooks status` for 5 seconds keyed on `session_id` to keep render time <100ms.
 
 ### 5. `scripts/`
 
+echook is **AI-agent-first**: every script is non-interactive and machine-callable.
+There are no human-only menus and no `curl | bash` flows — an agent operates the whole
+project through the `audio-hooks` CLI. The script install below is the engine behind
+`audio-hooks install` (cloned-repo / non-plugin path); on Claude Code the canonical path
+is the plugin marketplace.
+
 | Script | Purpose | AI-callable? |
 |---|---|---|
-| `install-complete.sh` | Legacy script install | yes (auto non-interactive on non-TTY) |
-| `install-windows.ps1` | PowerShell installer for Windows | yes |
-| `quick-setup.sh` | Lite tier (zero deps, no Python) | yes |
-| `quick-configure.sh` | Lite tier hook toggling | yes |
-| `quick-unsetup.sh` | Lite tier uninstall | yes |
-| `snooze.sh` | Legacy snooze CLI | yes (`audio-hooks snooze` is preferred) |
-| `uninstall.sh` | Legacy uninstall | yes (auto non-interactive, `--purge` for full removal) |
+| `install-complete.sh` | Script install engine (registers `hook_runner.py`) | yes — always non-interactive |
+| `install-windows.ps1` | PowerShell install engine for Windows | yes — always non-interactive |
+| `uninstall.sh` | Uninstall engine | yes — always non-interactive, `--purge` for full removal |
 | `build-plugin.sh` | Sync canonical → plugin layout | yes (NDJSON output, `--check` flag for CI) |
+| `bump-version.sh` | Atomic version bump across canonical files | yes (JSON output) |
 | `generate-audio.py` | ElevenLabs audio generator | yes (NDJSON output, `--force` / `--only` / `--dry-run`) |
-| `configure.sh` | Human-only menu | **no** — auto-redirects to `audio-hooks` via `INTERACTIVE_SCRIPT` JSON pointer when invoked non-interactively |
-| `test-audio.sh` | Human-only menu | **no** — same |
-| `diagnose.py` | Legacy diagnose | yes (`audio-hooks diagnose` is preferred) |
+
+All configure / test / snooze / diagnose operations are CLI subcommands
+(`audio-hooks set`, `audio-hooks test all`, `audio-hooks snooze`, `audio-hooks diagnose`)
+— the former `configure.sh` / `test-audio.sh` / `snooze.sh` / `diagnose.py` and the
+`quick-*` lite-tier scripts were removed in v6.0.0.
 
 ### 6. Cursor IDE integration (5.1.4+, hardened in 5.1.6)
 
@@ -435,7 +439,7 @@ class ErrorCode:
     INTERNAL_ERROR = "INTERNAL_ERROR"
 ```
 
-The `bin/audio-hooks.py` `cmd_diagnose` function adds two more codes that are CLI-specific (not from hook_runner): `DUAL_INSTALL_DETECTED` and `INTERACTIVE_SCRIPT`.
+The `bin/audio-hooks.py` `cmd_diagnose` function adds one more code that is CLI-specific (not from hook_runner): `DUAL_INSTALL_DETECTED`.
 
 `_ERROR_HINTS` (a dict in `hook_runner.py`) maps each code to a `hint` (one sentence) and `suggested_command` (a literal `audio-hooks ...` command). When `log_error_event(code, action, message)` is called, the resulting NDJSON event has the full error object populated automatically.
 
@@ -445,10 +449,9 @@ The `bin/audio-hooks.py` `cmd_diagnose` function adds two more codes that are CL
 |---|---|
 | `~/.claude/settings.json` legacy hook entries (`Notification`, `Stop`, `SubagentStop`, `PermissionRequest`) | Still work — canonical hook names resolve in `hook_runner.main()` |
 | Free-text `debug.log`, `errors.log`, `hook_triggers.log` | Replaced by `events.ndjson`. Legacy `log_debug`/`log_error`/`log_trigger` are now thin NDJSON wrappers. |
-| `<project>/config/user_preferences.json` (script install) | Still the resolution target for legacy script installs |
-| `bash scripts/install-complete.sh` interactive mode | Still works for human users; auto non-interactive on non-TTY |
-| `scripts/snooze.sh` CLI | Still works; `audio-hooks snooze` is preferred |
-| `scripts/diagnose.py` | Still works; `audio-hooks diagnose` is preferred (returns JSON) |
+| `<project>/config/user_preferences.json` (script install) | Still the resolution target for script installs |
+| `bash scripts/install-complete.sh` | Still works; now always non-interactive (no human menu) |
+| `scripts/snooze.sh` / `configure.sh` / `test-audio.sh` / `diagnose.py` / `quick-*` | Removed in v6.0.0 — use `audio-hooks snooze` / `set` / `test all` / `diagnose` |
 | Pre-v5 `user_preferences.json` schema | Forward-compatible — new keys are optional with sensible defaults |
 
 ## Build pipeline

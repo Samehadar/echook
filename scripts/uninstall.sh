@@ -5,16 +5,10 @@
 
 set -e
 
-# Non-interactive mode flag.
-# Auto-engages when stdin is not a TTY (piped uninstall, AI agent, CI) or
-# when CLAUDE_NONINTERACTIVE=1 is set. Forced via --yes / --non-interactive.
-if [ ! -t 0 ] || [ -n "${CLAUDE_NONINTERACTIVE:-}" ]; then
-    NON_INTERACTIVE=true
-else
-    NON_INTERACTIVE=false
-fi
-# Default in non-interactive mode: PRESERVE config and audio (less destructive).
-# Use --purge to remove them in non-interactive mode.
+# echook is AI-agent-first: uninstall is always non-interactive and never
+# prompts. By default it PRESERVES config and audio (least destructive); pass
+# --purge to also remove them.
+NON_INTERACTIVE=true
 PURGE=false
 
 # Colors
@@ -70,7 +64,8 @@ HOOK_EVENTS=(
 while [ $# -gt 0 ]; do
     case "$1" in
         --yes|-y|--non-interactive)
-            NON_INTERACTIVE=true
+            # Accepted as a no-op for backward compatibility — this script is
+            # always non-interactive.
             shift
             ;;
         --purge)
@@ -79,40 +74,31 @@ while [ $# -gt 0 ]; do
             ;;
         --help|-h)
             cat << EOF
-${BOLD}echook - Uninstallation Script${NC}
+${BOLD}echook - Uninstallation Script (AI-agent-first, always non-interactive)${NC}
 
 ${CYAN}USAGE:${NC}
   $0 [OPTIONS]
 
 ${CYAN}OPTIONS:${NC}
+  ${BOLD}--purge${NC}
+    Also remove your config (config/user_preferences.json) and audio files.
+    Without it, those are PRESERVED (least-destructive default).
+
   ${BOLD}--yes, -y, --non-interactive${NC}
-    Run in non-interactive mode (auto-confirm all prompts)
-    Perfect for Claude Code and automation scripts
-    Removes: hooks, settings, config, audio files
+    No-op, accepted for backward compatibility. This script never prompts.
 
   ${BOLD}--help, -h${NC}
     Show this help message
 
-${CYAN}INTERACTIVE MODE${NC} (default):
-  Prompts for confirmation before:
-  - Starting uninstallation
-  - Removing configuration file
-  - Removing audio files
-
-${CYAN}NON-INTERACTIVE MODE${NC} (--yes):
-  Auto-confirms all prompts
-  Removes everything (hooks, settings, config, audio)
-  Creates backup before removal
+${CYAN}BEHAVIOR:${NC}
+  Always runs unattended (no prompts). Removes the registered hooks and
+  settings; preserves config + audio unless --purge is given. A backup is
+  created before any removal.
 
 ${CYAN}EXAMPLES:${NC}
-  # Interactive uninstallation (prompts for confirmation)
-  bash scripts/uninstall.sh
-
-  # Non-interactive uninstallation (for Claude Code/automation)
-  bash scripts/uninstall.sh --yes
-
-  # Short form
-  bash scripts/uninstall.sh -y
+  bash scripts/uninstall.sh            # remove hooks, keep config + audio
+  bash scripts/uninstall.sh --purge    # also remove config + audio
+  # Prefer the CLI wrapper:  audio-hooks uninstall [--purge]
 
 ${YELLOW}Note:${NC} Backups are created in: /tmp/claude_hooks_backup_*
 EOF
@@ -143,18 +129,7 @@ echo -e "  • Permissions from settings.local.json"
 echo -e "  • Optionally: audio files and project configuration"
 echo ""
 
-if [ "$NON_INTERACTIVE" = true ]; then
-    echo -e "${GREEN}Running in non-interactive mode - auto-confirming...${NC}"
-else
-    read -p "Are you sure you want to uninstall? (y/N): " -n 1 -r
-    echo ""
-
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        echo -e "${CYAN}Uninstallation cancelled.${NC}"
-        exit 0
-    fi
-fi
-
+echo -e "${GREEN}Uninstalling (non-interactive)...${NC}"
 echo ""
 
 #=============================================================================
@@ -366,58 +341,28 @@ fi
 
 echo -e "${BLUE}${BOLD}Optional cleanup:${NC}\n"
 
-# Ask about configuration file
+# Configuration file: removed only with --purge (default preserves it).
 if [ -f "$PROJECT_DIR/config/user_preferences.json" ]; then
-    if [ "$NON_INTERACTIVE" = true ]; then
-        # Non-interactive: only remove if --purge was given. Default is PRESERVE.
-        if [ "$PURGE" = true ]; then
-            cp "$PROJECT_DIR/config/user_preferences.json" "$BACKUP_DIR/user_preferences.json.backup"
-            rm "$PROJECT_DIR/config/user_preferences.json"
-            echo -e "${GREEN}✓${NC} Removed configuration file (backed up, --purge)"
-        else
-            echo -e "${CYAN}ℹ${NC} Preserved configuration file (use --purge to remove)"
-        fi
+    if [ "$PURGE" = true ]; then
+        cp "$PROJECT_DIR/config/user_preferences.json" "$BACKUP_DIR/user_preferences.json.backup"
+        rm "$PROJECT_DIR/config/user_preferences.json"
+        echo -e "${GREEN}✓${NC} Removed configuration file (backed up, --purge)"
     else
-        read -p "Remove your configuration file (config/user_preferences.json)? (y/N): " -n 1 -r
-        echo ""
-        if [[ $REPLY =~ ^[Yy]$ ]]; then
-            # Backup first
-            cp "$PROJECT_DIR/config/user_preferences.json" "$BACKUP_DIR/user_preferences.json.backup"
-            rm "$PROJECT_DIR/config/user_preferences.json"
-            echo -e "${GREEN}✓${NC} Removed configuration file (backed up)"
-        else
-            echo -e "${CYAN}ℹ${NC} Configuration file kept"
-        fi
+        echo -e "${CYAN}ℹ${NC} Preserved configuration file (use --purge to remove)"
     fi
     echo ""
 fi
 
-# Ask about audio files
-if [ "$NON_INTERACTIVE" = true ]; then
-    # Non-interactive: only remove if --purge was given. Default is PRESERVE.
-    if [ "$PURGE" = true ] && [ -d "$PROJECT_DIR/audio/default" ]; then
+# Audio files: removed only with --purge (default preserves them).
+if [ -d "$PROJECT_DIR/audio/default" ]; then
+    if [ "$PURGE" = true ]; then
         mkdir -p "$BACKUP_DIR/audio"
         cp -r "$PROJECT_DIR/audio/default" "$BACKUP_DIR/audio/"
         rm -rf "$PROJECT_DIR/audio/default"/*
         echo -e "${GREEN}✓${NC} Removed audio files (backed up, --purge)"
-    elif [ -d "$PROJECT_DIR/audio/default" ]; then
+    else
         echo -e "${CYAN}ℹ${NC} Preserved audio files (use --purge to remove)"
     fi
-else
-    read -p "Remove audio files in audio/default/ directory? (y/N): " -n 1 -r
-    echo ""
-fi
-
-if [[ "$NON_INTERACTIVE" != true && $REPLY =~ ^[Yy]$ ]]; then
-    if [ -d "$PROJECT_DIR/audio/default" ]; then
-        # Backup audio files
-        mkdir -p "$BACKUP_DIR/audio"
-        cp -r "$PROJECT_DIR/audio/default" "$BACKUP_DIR/audio/"
-        rm -rf "$PROJECT_DIR/audio/default"/*
-        echo -e "${GREEN}✓${NC} Removed audio files (backed up)"
-    fi
-else
-    echo -e "${CYAN}ℹ${NC} Audio files kept"
 fi
 
 echo ""

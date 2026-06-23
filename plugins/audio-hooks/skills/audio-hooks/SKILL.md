@@ -1,6 +1,6 @@
 ---
 name: audio-hooks
-description: Use whenever the user asks to install, configure, uninstall, snooze, mute, test, troubleshoot, or change settings for the echook audio notification system. Trigger phrases include "audio hooks", "audio notifications", "snooze audio", "mute claude", "claude is too loud", "test audio", "switch audio theme", "rate limit alerts", "audio webhook", "TTS", "text to speech", "focus flow", "breathing exercise", "notification mode", "audio only", "notification only", "debounce", "status line", "statusline", "context usage", "context window", "context monitor", "compact reminder", "uninstall audio", "audio status", "audio version", "install for cursor", "install for codex", "codex audio", "codex hooks", "cursor audio", "cursor hooks", and the slash command /audio-hooks. Also use when diagnosing why Claude Code, Cursor, or Codex is silent (or noisy) for the user, or when the user wants to monitor context window usage.
+description: Use whenever the user asks to install, configure, uninstall, snooze, mute, test, troubleshoot, or change settings for the echook audio notification system. Trigger phrases include "audio hooks", "audio notifications", "snooze audio", "mute claude", "claude is too loud", "test audio", "switch audio theme", "rate limit alerts", "audio webhook", "TTS", "text to speech", "notification mode", "audio only", "notification only", "debounce", "status line", "statusline", "context usage", "context window", "context monitor", "compact reminder", "uninstall audio", "audio status", "audio version", "install for cursor", "install for codex", "codex audio", "codex hooks", "cursor audio", "cursor hooks", and the slash command /audio-hooks. Also use when diagnosing why Claude Code, Cursor, or Codex is silent (or noisy) for the user, or when the user wants to monitor context window usage.
 ---
 
 # audio-hooks skill
@@ -67,7 +67,7 @@ Run `audio-hooks hooks list` to see all 26 hooks with their current state. Then:
 
 **Check project status**
 
-Run `audio-hooks status` when the user asks "what's the current audio config?", "is audio working?", "show me audio status", etc. It returns a full snapshot: version, theme, enabled hooks count, snooze state, focus flow, webhook, TTS, rate-limit alerts, and install mode.
+Run `audio-hooks status` when the user asks "what's the current audio config?", "is audio working?", "show me audio status", etc. It returns a full snapshot: version, theme, enabled hooks count, snooze state, webhook, TTS, rate-limit alerts, and install mode.
 
 ```bash
 audio-hooks status                     # full state snapshot
@@ -100,7 +100,9 @@ Supported formats: `slack`, `discord`, `teams`, `ntfy`, `raw`. The raw format sh
 
 ```bash
 audio-hooks tts set --enabled true
-# v5.0: TTS Claude's actual final reply on stop/subagent_stop
+# Speak a sanitized summary of Claude's final reply on stop/subagent_stop.
+# Code blocks and secrets are stripped automatically before anything is spoken,
+# but note the reply is read aloud — avoid near bystanders.
 audio-hooks tts set --speak-assistant-message true
 audio-hooks tts set --assistant-message-max-chars 200
 ```
@@ -138,10 +140,10 @@ The `📁` segment (`cwd`) shows the current working directory — abbreviated (
 
 **Customise which status line segments to show**
 
-The status line has 11 segments the user can freely combine. By default all are shown. Set `statusline_settings.visible_segments` to an array of segment names to show only those:
+The status line has 10 segments the user can freely combine. By default all are shown. Set `statusline_settings.visible_segments` to an array of segment names to show only those:
 
 Line 1 segments: `model`, `cwd`, `version`, `sounds`, `webhook`, `theme`
-Line 2 segments: `snooze`, `focus`, `branch`, `api_quota`, `context`
+Line 2 segments: `snooze`, `branch`, `api_quota`, `context`
 
 | User says | Run |
 |---|---|
@@ -187,18 +189,15 @@ Control how notifications are delivered — audio only, desktop notification onl
 audio-hooks set playback_settings.debounce_ms 300
 ```
 
-**Focus Flow (anti-distraction micro-tasks)**
+**Scope (what this plugin does — and does not — do)**
 
-Focus Flow offers a brief breathing exercise or mindfulness prompt while Claude is thinking, helping the user stay focused during long operations:
-
-| User says | Run |
-|---|---|
-| "enable focus flow" / "breathing exercises" | `audio-hooks set focus_flow.enabled true` |
-| "disable focus flow" | `audio-hooks set focus_flow.enabled false` |
-| "change breathing pattern to 4-7-8" | `audio-hooks set focus_flow.breathing_pattern "4-7-8"` |
-| "only show focus after 30 seconds of thinking" | `audio-hooks set focus_flow.min_thinking_seconds 30` |
-
-Modes: `breathing` (default). Breathing patterns: `4-7-8` (default), or other supported patterns. `min_thinking_seconds` (default 15) controls the delay before the focus prompt appears.
+echook is two tracks only: **(1) audio + out-of-band notification** of editor lifecycle
+events (sounds, desktop toasts, TTS spoken summaries, webhook fan-out, rate-limit sound
+alerts) and **(2) the status line**. Anything that is neither a notification nor a status
+line segment — breathing/wellness exercises, pomodoro/timers, gamification, opening URLs,
+or running side-commands during a session — is out of scope by design. If the user asks
+for such a feature, say it's intentionally not part of echook rather than trying to add it.
+(The `focus_flow` / breathing feature was removed in v6.0.0.)
 
 **Uninstall**
 
@@ -417,11 +416,9 @@ audio-hooks tts set --enabled true --speak-assistant-message true
 audio-hooks rate-limits set --five-hour-thresholds 80,95
 
 audio-hooks set notification_settings.mode <mode>            # audio_only | notification_only | audio_and_notification | disabled
-audio-hooks set notification_settings.detail_level <level>   # minimal | standard | verbose
+audio-hooks set notification_settings.detail_level <level>   # minimal | standard | verbose (verbose = full sanitized summary)
 audio-hooks set notification_settings.per_hook.<hook> <mode> # per-hook override
 audio-hooks set playback_settings.debounce_ms <int>          # min ms between same hook (default 500)
-audio-hooks set focus_flow.enabled true                      # enable focus flow
-audio-hooks set focus_flow.breathing_pattern "4-7-8"         # breathing pattern
 
 audio-hooks statusline install             # register status line (restart Claude Code after)
 audio-hooks statusline uninstall           # remove status line

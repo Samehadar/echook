@@ -155,7 +155,7 @@ def require_project_root() -> int:
 # Project state — version, install detection, hook catalogue
 # ---------------------------------------------------------------------------
 
-PROJECT_VERSION = "5.3.0"
+PROJECT_VERSION = "6.0.0"
 
 # Canonical hook catalogue. Order matches CLAUDE.md and the install scripts.
 HOOK_CATALOG: List[Dict[str, Any]] = [
@@ -237,7 +237,7 @@ def _detect_install_mode() -> Dict[str, Any]:
     if script_install and plugin_install:
         result["warning"] = {
             "code": "DUAL_INSTALL_DETECTED",
-            "message": "Both the legacy script install and the plugin install are active. This causes double audio. Run `bash scripts/uninstall.sh --yes` from the project directory to remove the legacy script install.",
+            "message": "Both the script install and the plugin install are active. This causes double audio. Run `audio-hooks uninstall` to remove the script install (preserves config + audio).",
         }
     return result
 
@@ -668,7 +668,6 @@ def cmd_status(_args: List[str]) -> int:
 
     webhook = cfg.get("webhook_settings", {}) or {}
     tts = cfg.get("tts_settings", {}) or {}
-    focus = cfg.get("focus_flow", {}) or {}
     rl = cfg.get("rate_limit_alerts", {}) or {}
     sl = cfg.get("statusline_settings", {}) or {}
     install = _detect_install_mode()
@@ -698,10 +697,6 @@ def cmd_status(_args: List[str]) -> int:
         "enabled_hook_count": len(enabled),
         "total_hook_count": len(HOOK_CATALOG),
         "snooze": _snooze_status(),
-        "focus_flow": {
-            "enabled": bool(focus.get("enabled")),
-            "mode": focus.get("mode", "disabled"),
-        },
         "webhook": {
             "enabled": bool(webhook.get("enabled")),
             "format": webhook.get("format", "raw"),
@@ -1193,8 +1188,8 @@ def cmd_diagnose(_args: List[str]) -> int:
         errors.append({
             "code": "DUAL_INSTALL_DETECTED",
             "message": install["warning"]["message"],
-            "hint": "Both legacy script install and plugin install fire on every event, causing duplicate audio.",
-            "suggested_command": "bash scripts/uninstall.sh --yes",
+            "hint": "Both the script install and the plugin install fire on every event, causing duplicate audio.",
+            "suggested_command": "audio-hooks uninstall",
         })
 
     editor_targets = _detect_editor_targets()
@@ -2258,8 +2253,6 @@ def _build_manifest_schema() -> Dict[str, Any]:
             "playback_settings": {
                 "type": "object",
                 "properties": {
-                    "queue_enabled": {"type": "boolean"},
-                    "max_queue_size": {"type": "integer", "minimum": 1},
                     "debounce_ms": {"type": "integer", "minimum": 0},
                 },
             },
@@ -2299,17 +2292,6 @@ def _build_manifest_schema() -> Dict[str, Any]:
                     "five_hour_thresholds": {"type": "array", "items": {"type": "integer", "minimum": 1, "maximum": 100}},
                     "seven_day_thresholds": {"type": "array", "items": {"type": "integer", "minimum": 1, "maximum": 100}},
                     "audio": {"type": "string"},
-                },
-            },
-            "focus_flow": {
-                "type": "object",
-                "properties": {
-                    "enabled": {"type": "boolean"},
-                    "mode": {"type": "string", "enum": ["breathing", "hydration", "url", "command", "disabled"]},
-                    "min_thinking_seconds": {"type": "integer", "minimum": 0},
-                    "url": {"type": "string"},
-                    "command": {"type": "string"},
-                    "breathing_pattern": {"type": "string"},
                 },
             },
         },
@@ -2372,7 +2354,6 @@ def _build_manifest() -> Dict[str, Any]:
         "config_keys": [
             "audio_theme",
             "enabled_hooks.<hook_name>",
-            "playback_settings.queue_enabled",
             "playback_settings.debounce_ms",
             "notification_settings.mode",
             "notification_settings.detail_level",
@@ -2389,10 +2370,6 @@ def _build_manifest() -> Dict[str, Any]:
             "rate_limit_alerts.enabled",
             "rate_limit_alerts.five_hour_thresholds",
             "rate_limit_alerts.seven_day_thresholds",
-            "focus_flow.enabled",
-            "focus_flow.mode",
-            "focus_flow.min_thinking_seconds",
-            "focus_flow.breathing_pattern",
         ],
         "themes": ["default", "custom"],
         "log_schema": "audio-hooks.v1",

@@ -7,7 +7,7 @@
 **AI-operated audio notification system for Claude Code, Cursor IDE, and Codex CLI.**<br/>
 You type one slash command at install time. Then natural language forever.<br/>
 26 hook events, 2 audio themes, rate-limit alerts, webhooks, TTS, context monitor — all operated by your AI agent on your behalf.<br/>
-**5.3.0 — Working-directory status line segment.** The status line now carries an 11th segment, `cwd`, that shows your current working directory on the top line (abbreviated, e.g. `📁 D:\…\echook`). Run many terminals and Claude Code sessions at once? You can tell at a glance which project a session is in — no more firing a project-A prompt inside project-B. On by default, individually toggleable. See the [v5.3.0 release notes](https://github.com/ChanMeng666/echook/releases/tag/v5.3.0).
+**v6.0.0 — refocus + AI-agent-first.** echook is now two tracks only — **audio/notification** and the **status line** — with every operation driven by a non-interactive CLI. No human menus, no `curl | bash`, nothing to hand-edit. See the [CHANGELOG](./CHANGELOG.md).
 
 <sub>**5.2.x — echook rebrand + Codex support.** Renamed `claude-code-audio-hooks` → **echook** (Echo + Hook) in 5.2.1 — a door-only rename with zero migration (CLI, marketplace name, and state dirs all unchanged; existing installs keep working). 5.2.0 added Codex CLI as a third editor target. Full history in the [CHANGELOG](./CHANGELOG.md).</sub>
 
@@ -37,6 +37,16 @@ https://github.com/user-attachments/assets/f57249be-a524-4e6f-8225-6b9500f1aea4
 
 </div>
 
+> ## 🤖 This is an AI-Agent-first project — you don't read this, your agent does
+>
+> **Humans: don't install or configure echook by hand, and don't spend time studying this README.** Point your AI agent — **Claude Code, Cursor, or Codex** — at this repo and say:
+>
+> > *"Install echook from `github.com/ChanMeng666/echook` and set it up for me."*
+>
+> Your agent reads the docs, runs every command, verifies the result, and reports back. The agent-facing source of truth is [`AGENTS.md`](AGENTS.md) + [`llms.txt`](llms.txt) + the live `audio-hooks manifest` — your agent already knows where to look. The only thing a human ever types by hand is one `/reload-plugins` slash command (Claude Code has no CLI equivalent for it).
+>
+> **All a human needs to know is what echook _does_** — skim [Key Features](#key-features) below — so you can ask your agent for it in plain English: *"mute audio for an hour"*, *"switch to chimes"*, *"watch my `.env` file"*, *"put a context-usage bar in my status line"*. Not sure what's possible? Just ask your agent **"what can I configure in echook?"** and it will list every option for you.
+
 <details>
 <summary><kbd>Table of Contents</kbd></summary>
 
@@ -64,16 +74,17 @@ https://github.com/user-attachments/assets/f57249be-a524-4e6f-8225-6b9500f1aea4
 
 ## What's New
 
-### v5.3.0 — Working-directory status line segment ([release](https://github.com/ChanMeng666/echook/releases/tag/v5.3.0))
+### v6.0.0 — Refocus + AI-agent-first hardening
 
-A new status line segment, **`cwd`**, renders your current working directory on Line 1 (right after the model), so anyone juggling many terminals and Claude Code sessions can instantly tell which project a session belongs to.
+echook is now **two tracks only — audio/notification and the status line** — and every operation is a non-interactive `audio-hooks` CLI command. This release sharpened the product and removed everything a human used to have to do by hand.
 
 | What | Detail |
 |---|---|
-| **Abbreviated path** | Home collapses to `~`; long paths shorten to `<root>…<last folder>` (e.g. `D:\…\claude-code-audio-hooks`). Never blows up the bar width. |
-| **Robust source** | Read from stdin `cwd`, falling back to `workspace.current_dir` → `workspace.project_dir`. |
-| **On by default** | Part of the default segment set; toggle freely, e.g. `audio-hooks set statusline_settings.visible_segments '["cwd","context"]'`. |
-| **Tested** | New `TestAbbrevPath` + `TestCwdSegment`; full suite is now **157 tests** green on the Ubuntu/Windows/macOS × Python 3.9/3.12/3.13 matrix. |
+| **Two-track scope** | Removed the off-track Focus Flow (breathing/wellness) feature. echook does notifications (sound, spoken summary, desktop toast, webhook) and the status line — nothing else. |
+| **AI-agent-first, no human menus** | Removed all human-interactive scripts (`configure.sh`, `test-audio.sh`, `snooze.sh`, `diagnose.py`) and the `curl \| bash` lite tier. The install/uninstall scripts are now **always non-interactive** — never prompt. Everything is an `audio-hooks` subcommand or a one-line agent prompt. |
+| **Safer notifications** | TTS reply-reading and `verbose` desktop toasts now route through a shared sanitizer that strips code/markdown and redacts secrets (API keys, tokens, JWTs) before anything is spoken or shown. |
+| **Leaner & more honest** | Removed dead config and a dead bash hook runtime; fixed the script installer to ship `hook_runner.py`'s dependencies. Added `llms.txt` (AI-agent entrypoint). |
+| **Tested** | Full suite is now **174 tests** green on the Ubuntu/Windows/macOS × Python 3.9/3.12/3.13 matrix, including a new sanitizer test module. |
 
 The headline 5.2.x callout near the top covers the echook rebrand + Codex CLI support. The v5.0 redesign — the AI-first foundation that made all of this possible — lives below for reference.
 
@@ -401,16 +412,6 @@ sequenceDiagram
     CC-->>You: Visible segments reset to all.
     end
 
-    rect rgb(232, 245, 233)
-    Note over You,CC: Focus Flow
-    You->>CC: Enable the audio-hooks focus flow<br/>with breathing exercises.
-    CC-->>You: Focus flow enabled — 4-7-8 breathing.
-    You->>CC: Switch focus flow to hydration reminders.
-    CC-->>You: Focus flow mode set to hydration.
-    You->>CC: Only show focus flow if Claude thinks<br/>for more than 30 seconds.
-    CC-->>You: min_thinking_seconds set to 30.
-    end
-
     rect rgb(229, 231, 235)
     Note over You,CC: Monitor, Debug & Uninstall
     You->>CC: Enable the audio-hooks file_changed hook and<br/>configure it to watch .env and .envrc.
@@ -422,7 +423,7 @@ sequenceDiagram
     You->>CC: Show me the last 20 errors and clear the log.
     CC-->>You: 2 errors found (WEBHOOK_TIMEOUT). Log cleared.
     You->>CC: What version of audio-hooks am I running?
-    CC-->>You: v5.3.0, plugin install.
+    CC-->>You: v6.0.0, plugin install.
     You->>CC: Please uninstall audio-hooks completely.
     CC-->>You: Plugin uninstalled. All hooks removed.
     end
@@ -454,11 +455,6 @@ Each prompt is one message. Your AI agent (Claude Code, Cursor, or Codex) parses
 | Per-hook override | *"For the stop hook, use desktop notification without audio."* |
 | Make notifications verbose | *"Make audio-hooks notifications more detailed."* |
 | Disable all notifications | *"Disable all audio-hooks notifications entirely."* |
-| **Focus Flow** | |
-| Breathing exercises | *"Enable the audio-hooks focus flow with breathing exercises."* |
-| Hydration reminders | *"Switch audio-hooks focus flow to hydration reminders."* |
-| Custom URL during thinking | *"Set audio-hooks focus flow to open `https://example.com` during thinking."* |
-| Longer thinking delay | *"Only show focus flow if Claude thinks for more than 30 seconds."* |
 | **Webhooks** | |
 | Send alerts to Slack | *"Send audio-hooks alerts to my Slack webhook at `https://hooks.slack.com/services/...` and test it."* |
 | Send alerts to Discord | *"Send audio-hooks alerts to my Discord webhook at `https://discord.com/api/webhooks/...` and test it."* |
@@ -508,7 +504,7 @@ flowchart LR
 
     HR -->|reads| RL[rate-limit pre-check<br/>marker debounce]
     HR -->|reads| CFG[user_preferences.json]
-    HR -->|reads| MARK[snooze + focus-flow markers]
+    HR -->|reads| MARK[snooze markers]
 
     HR -->|fires| AUDIO[Audio playback<br/>26 MP3s, 2 themes]
     HR -->|fires| NOTIF[Desktop notification]
@@ -539,7 +535,7 @@ flowchart TB
     SKILL -->|invokes via Bash tool| BIN[bin/audio-hooks]
 
     BIN -->|reads| CONFIG[(user_preferences.json<br/>in plugin data dir)]
-    BIN -->|reads| MARKERS[(snooze + focus-flow markers)]
+    BIN -->|reads| MARKERS[(snooze markers)]
     BIN -->|reads| LOGS[(NDJSON event log)]
     BIN -->|writes| CONFIG
     BIN -->|writes| MARKERS
@@ -641,11 +637,11 @@ Real-time context window and API quota bars — color-coded warnings before Clau
 </p>
 
 ```text
-[Opus] 📁 D:\…\claude-code-audio-hooks | echook v5.3.0 | 6/26 Sounds | Webhook: ntfy | Theme: Voice
+[Opus] 📁 D:\…\claude-code-audio-hooks | echook v6.0.0 | 6/26 Sounds | Webhook: ntfy | Theme: Voice
 [MUTED 23m]  feat/audio-v5  API Quota: 78%  Context: 65% (130K/200K)  /compact
 ```
 
-**Status line anatomy** — two lines, 11 freely-combinable segments:
+**Status line anatomy** — two lines, 10 freely-combinable segments:
 
 ```mermaid
 flowchart LR
@@ -655,7 +651,7 @@ flowchart LR
     end
     subgraph L2["Line 2 — live state"]
         direction LR
-        SN["snooze"] --- F["focus"] --- B["🌿 branch"] --- AQ["api_quota bar"] --- CX["context bar<br/>+ /compact hint"]
+        SN["snooze"] --- B["🌿 branch"] --- AQ["api_quota bar"] --- CX["context bar<br/>+ /compact hint"]
     end
     L1 ~~~ L2
 
@@ -664,7 +660,7 @@ flowchart LR
     style AQ fill:#F5A623,color:#000
 ```
 
-> The green **`cwd`** segment is new in v5.3.0. Read more under [11 customisable segments](#key-features) below.
+> The green **`cwd`** segment shows which project a session is in. Read more under [10 customisable segments](#key-features) below.
 
 | Color | Range | Meaning | Action |
 |---|---|---|---|
@@ -675,7 +671,7 @@ flowchart LR
 **Absolute counts (v5.1.3+).** When Claude Code reports the context window size, the segment also shows current/max tokens, e.g. `Context: 83% (166K/200K)`. This makes the math obvious when you `/model`-switch between context-window variants — switching from Opus 4.7 (1M) to Sonnet 4.6 (200K) keeps your tokens identical but shrinks the denominator 5×, so a sudden jump from `17%` to `83%` is **expected**, not a bug. See `docs/TROUBLESHOOTING.md#context-97-or-any-sudden-jump-right-after-switching-models` for the full explanation.
 
 <details>
-<summary><kbd>11 customisable segments</kbd></summary>
+<summary><kbd>10 customisable segments</kbd></summary>
 <br>
 
 | Segment | Shows |
@@ -687,7 +683,6 @@ flowchart LR
 | `webhook` | Webhook status |
 | `theme` | Audio theme |
 | `snooze` | Mute countdown (when active) |
-| `focus` | Focus Flow mode (when active) |
 | `branch` | Git branch name |
 | `api_quota` | API usage quota bar |
 | `context` | Context window usage bar |
@@ -749,11 +744,7 @@ Watches every hook's stdin for `rate_limits` and plays a one-shot warning at con
 
 ### TTS — Speak Claude's Reply
 
-Instead of a static "Task completed", TTS speaks Claude's actual final message (truncated to 200 chars). Off by default — privacy-conscious. Say *"speak Claude's actual reply when done"* to enable.
-
-### Focus Flow
-
-Anti-distraction micro-task during Claude's thinking time: guided breathing exercise, hydration reminder, custom URL, or shell command. Auto-closes when Claude finishes. Say *"enable focus flow with breathing exercises"*.
+Instead of a static "Task completed", TTS can speak a sanitized summary of Claude's actual final message (truncated to 200 chars on a sentence boundary; code blocks and secrets are stripped automatically before anything is spoken). Useful when you're away from the screen. Off by default. Say *"speak Claude's actual reply when done"* to enable.
 
 ---
 
@@ -807,7 +798,6 @@ Single Python binary on PATH. JSON output, no prompts, no spinners.
 | `rate_limit_alerts.enabled` | bool | `true` | Watch stdin rate_limits |
 | `rate_limit_alerts.five_hour_thresholds` | int[] | `[80, 95]` | 5h window thresholds |
 | `rate_limit_alerts.seven_day_thresholds` | int[] | `[80, 95]` | 7d window thresholds |
-| `focus_flow.enabled` / `mode` / `min_thinking_seconds` / `breathing_pattern` | mixed | off / `breathing` / 15 / `4-7-8` | Anti-distraction micro-task |
 | `statusline_settings.visible_segments` | string[] | `[]` (all) | Status line segments to show |
 
 ### Environment Variables
@@ -819,7 +809,6 @@ Single Python binary on PATH. JSON output, no prompts, no spinners.
 | `CLAUDE_AUDIO_HOOKS_DATA` | Explicit override for state directory |
 | `CLAUDE_AUDIO_HOOKS_PROJECT` | Explicit override for project root |
 | `CLAUDE_HOOKS_DEBUG` | `1` to write debug-level events to NDJSON log |
-| `CLAUDE_NONINTERACTIVE` | `1` to force scripts into non-interactive mode |
 | `ELEVENLABS_API_KEY` | Used by `scripts/generate-audio.py` (never logged) |
 
 ### Stable Error Codes
@@ -836,7 +825,7 @@ Single Python binary on PATH. JSON output, no prompts, no spinners.
 | `NOTIFICATION_FAILED` | Desktop notification failed | `audio-hooks diagnose` |
 | `TTS_FAILED` | TTS engine failed | `audio-hooks tts set --enabled false` |
 | `SETTINGS_DISABLE_ALL_HOOKS` | `disableAllHooks: true` in settings | `audio-hooks diagnose` |
-| `DUAL_INSTALL_DETECTED` | Both install methods active | `bash scripts/uninstall.sh --yes` |
+| `DUAL_INSTALL_DETECTED` | Both install methods active | `audio-hooks uninstall` |
 | `PROJECT_DIR_NOT_FOUND` | Can't locate project | `audio-hooks status` |
 | `UNKNOWN_HOOK_TYPE` | Unrecognised hook name | `audio-hooks hooks list` |
 | `INTERNAL_ERROR` | Unexpected error | `audio-hooks logs tail` |
@@ -861,12 +850,12 @@ Levels: `debug`, `info`, `warn`, `error`. Log rotation: 5 MB cap, 3 files kept.
 /reload-plugins
 ```
 
-**Legacy script install** (pre-v5.0, still works):
+**Script install** (cloned-repo / non-plugin path — the agent runs this for you):
 
 ```bash
 git clone https://github.com/ChanMeng666/echook.git
 cd echook
-bash scripts/install-complete.sh    # auto non-interactive on non-TTY
+bash scripts/install-complete.sh    # always non-interactive — never prompts
 ```
 
 Both paths share the same `hook_runner.py` and `audio-hooks` CLI. They are mutually exclusive — `audio-hooks diagnose` reports `DUAL_INSTALL_DETECTED` if both are active.
@@ -916,7 +905,7 @@ Run `audio-hooks diagnose`, look for any error code, and run its `suggested_comm
 <details>
 <summary>&nbsp;&nbsp;<strong>Hearing double sounds</strong></summary><br>
 
-Both legacy script install and plugin install are active. Diagnose reports `DUAL_INSTALL_DETECTED`. Fix: `bash scripts/uninstall.sh --yes` (removes legacy, preserves config).
+Both the script install and the plugin install are active. Diagnose reports `DUAL_INSTALL_DETECTED`. Fix: `audio-hooks uninstall` (removes the script install, preserves config + audio) — or just say *"audio-hooks is playing double sounds, fix it."*
 
 </details>
 </td></tr>
@@ -944,17 +933,19 @@ They fire on every tool execution (Read, Glob, Grep, etc.) — disabled by defau
 
 ## Uninstall
 
-**Plugin install:** say *"uninstall audio-hooks"* or manually:
+**Just tell your agent:** *"Uninstall audio-hooks completely."* It picks the right path for your install. For reference:
+
+**Plugin install:**
 
 ```text
 /plugin uninstall audio-hooks@chanmeng-audio-hooks
 ```
 
-**Legacy script install:**
+**Script install** (the agent runs this — always non-interactive):
 
 ```bash
-bash scripts/uninstall.sh --yes              # preserve config + audio
-bash scripts/uninstall.sh --yes --purge      # remove everything
+audio-hooks uninstall            # preserve config + audio
+audio-hooks uninstall --purge    # also remove config + audio
 ```
 
 ---
@@ -999,7 +990,7 @@ echook/
 │   ├── bump-version.sh               # atomic version bump across 8 files
 │   ├── generate-audio.py
 │   └── ...
-├── tests/                            # 157 unittest cases (Cursor + Codex bridge contracts)
+├── tests/                            # 174 unittest cases (Cursor + Codex bridge contracts)
 ├── CLAUDE.md
 ├── README.md
 └── CHANGELOG.md
@@ -1011,7 +1002,7 @@ echook/
 2. Run `bash scripts/build-plugin.sh` to sync into plugin layout
 3. CI verifies in-sync via `bash scripts/build-plugin.sh --check`
 4. Validate: `claude plugin validate plugins/audio-hooks`
-5. Test: `python -m unittest discover -v tests` (157 tests; Ubuntu/Windows/macOS × Python 3.9/3.12/3.13 in CI)
+5. Test: `python -m unittest discover -v tests` (174 tests; Ubuntu/Windows/macOS × Python 3.9/3.12/3.13 in CI)
 6. Bump version (when releasing): `bash scripts/bump-version.sh <new_version>` — atomically updates 8 canonical version locations and re-runs `build-plugin.sh`
 
 ### Contributing
@@ -1024,14 +1015,17 @@ Pull requests welcome. Fork, clone, make changes to canonical files, run `build-
 
 ## Documentation
 
+> **Agents start here:** an AI agent operating echook should read `AGENTS.md` (or `llms.txt`) and run `audio-hooks manifest` — that's the complete, live, truthful state of the project. Everything else below is for humans who are curious.
+
 | Document | Purpose |
 |---|---|
-| [**CLAUDE.md**](CLAUDE.md) | Canonical AI-facing operating guide (~40 lines, points everywhere else) |
-| [**docs/INSTALLATION_GUIDE.md**](docs/INSTALLATION_GUIDE.md) | Step-by-step install for Claude Code / Cursor / Codex |
+| [**AGENTS.md**](AGENTS.md) | **Agent-facing operating guide** — the critical rules (CLI-only, manifest-first, two-track scope, AI-agent-first). Mirrored as [`CLAUDE.md`](CLAUDE.md). |
+| [**llms.txt**](llms.txt) | AI-agent entrypoint — orients any LLM/agent to install + operate via the CLI. |
+| [**docs/INSTALLATION_GUIDE.md**](docs/INSTALLATION_GUIDE.md) | Full install/uninstall flow for Claude Code / Cursor / Codex |
 | [**docs/TROUBLESHOOTING.md**](docs/TROUBLESHOOTING.md) | Diagnostic recipes for common issues |
 | [**docs/ARCHITECTURE.md**](docs/ARCHITECTURE.md) | System architecture and design decisions |
 | [**CHANGELOG.md**](CHANGELOG.md) | Detailed version history |
-| [**GitHub Releases**](https://github.com/ChanMeng666/echook/releases) | Tagged, versioned distribution — every release from v5.3.0 back, with notes. [Latest release](https://github.com/ChanMeng666/echook/releases/latest). |
+| [**GitHub Releases**](https://github.com/ChanMeng666/echook/releases) | Tagged, versioned distribution — every release from v6.0.0 back, with notes. [Latest release](https://github.com/ChanMeng666/echook/releases/latest). |
 | [**CI (smoke.yml)**](https://github.com/ChanMeng666/echook/actions/workflows/smoke.yml) | Live build status across Ubuntu/Windows/macOS × Python 3.9/3.12/3.13. |
 | `audio-hooks manifest` | Live source of truth — includes `subcommands`, `hooks`, `config_keys`, `error_codes`, `env_vars`, `editor_targets`, `supported_editors`, and `pointers` (paths to every doc above). Always up to date. |
 

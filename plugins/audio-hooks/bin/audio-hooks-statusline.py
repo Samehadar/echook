@@ -9,7 +9,7 @@ When the array is empty (default) every segment is shown.
 Available segments
 ------------------
 Line 1: model, cwd, version, sounds, webhook, theme
-Line 2: snooze, focus, branch, api_quota, context
+Line 2: snooze, branch, api_quota, context
 
 The ``cwd`` segment shows the current working directory as an abbreviated
 path (home folder collapsed to ``~``; long paths shortened to
@@ -55,9 +55,9 @@ RESET = "\033[0m"
 CACHE_TTL_SEC = 5
 
 ALL_SEGMENTS = {"model", "cwd", "version", "sounds", "webhook", "theme",
-                "snooze", "focus", "branch", "api_quota", "context"}
+                "snooze", "branch", "api_quota", "context"}
 LINE1_SEGMENTS = {"model", "cwd", "version", "sounds", "webhook", "theme"}
-LINE2_SEGMENTS = {"snooze", "focus", "branch", "api_quota", "context"}
+LINE2_SEGMENTS = {"snooze", "branch", "api_quota", "context"}
 
 # Backwards compatibility: accept old segment names from existing configs
 _SEGMENT_ALIASES = {"hooks": "sounds", "rate_limit": "rate-limit", "ctx": "context"}
@@ -359,10 +359,6 @@ def main() -> int:
     if show("snooze") and snooze.get("active"):
         remaining = int(snooze.get("remaining_seconds", 0))
         parts.append(f"{YELLOW}[MUTED {_format_remaining(remaining)}]{RESET}")
-
-    focus = status.get("focus_flow") or {}
-    if show("focus") and focus.get("enabled") and focus.get("mode") not in (None, "disabled", ""):
-        parts.append(f"{CYAN}[Focus: {focus.get('mode')}]{RESET}")
 
     if show("branch") and git_worktree:
         parts.append(f"\U0001f33f {git_worktree}")

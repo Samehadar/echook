@@ -1,6 +1,6 @@
 # Troubleshooting
 
-> **Version:** 5.3.0 | **Last Updated:** 2026-06-22
+> **Version:** 6.0.0 | **Last Updated:** 2026-06-23
 
 The troubleshooting story is one command:
 
@@ -21,9 +21,8 @@ It returns a JSON document listing the platform, audio player binary, the state 
 | `WEBHOOK_HTTP_ERROR` / `WEBHOOK_TIMEOUT` | Webhook unreachable | `audio-hooks webhook test`; check the URL and network |
 | `TTS_FAILED` | TTS engine failed or missing | `audio-hooks tts set --enabled false` or install: macOS `say` (built-in), Linux `apt install espeak`, Windows SAPI (built-in) |
 | `SETTINGS_DISABLE_ALL_HOOKS` | `~/.claude/settings.json` has `"disableAllHooks": true` | Edit the settings file to remove or set `false` |
-| `DUAL_INSTALL_DETECTED` | Both legacy script install and plugin install are active | `bash scripts/uninstall.sh --yes` (removes legacy, preserves config + audio) |
+| `DUAL_INSTALL_DETECTED` | Both the script install and the plugin install are active | `audio-hooks uninstall` (removes the script install, preserves config + audio) |
 | `PROJECT_DIR_NOT_FOUND` | Could not locate project directory | Ensure the project files are present at the install location |
-| `INTERACTIVE_SCRIPT` | You tried to invoke a human-only menu non-interactively (configure.sh / test-audio.sh) | Use `audio-hooks` instead |
 | `DUPLICATE_BRIDGE` | `install --cursor` aborted because Claude Code's plugin already auto-bridges to Cursor (would cause double audio) | `audio-hooks uninstall --plugin` first, **or** pass `--force` to `install --cursor` if you want both paths active (rare) |
 | `DUPLICATE_BRIDGE_RUNTIME_SKIP` | Runtime skipped a Cursor invocation because `install_marker.json` records `duplicate_bridge_forced: true` (you ran `install --cursor --force` over an active bridge) | `audio-hooks uninstall --cursor` to remove the native install — Claude Code's bridge then handles Cursor normally |
 | `CURSOR_NOT_FOUND` | `install --cursor` couldn't find `~/.cursor/` | Install Cursor IDE first, then re-run |
@@ -35,13 +34,13 @@ It returns a JSON document listing the platform, audio player binary, the state 
 
 ### Two sounds overlapping (voice + chime)
 
-You have both the legacy script install and the plugin install active. Diagnose reports `DUAL_INSTALL_DETECTED`. Fix:
+You have both the script install and the plugin install active. Diagnose reports `DUAL_INSTALL_DETECTED`. Fix:
 
 ```bash
-bash scripts/uninstall.sh --yes        # preserves config + audio by default
+audio-hooks uninstall        # removes the script install; preserves config + audio
 ```
 
-Then `/reload-plugins` inside Claude Code.
+Then `/reload-plugins` inside Claude Code. (Or just say *"audio-hooks is playing double sounds, fix it."*)
 
 ### No sound at all
 
