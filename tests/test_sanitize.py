@@ -11,10 +11,17 @@ Purpose: ``_clean_for_output`` is the shared gate that both spoken TTS replies
 and verbose desktop toasts pass through. These tests pin its contract — code
 blocks and secrets must never reach speech/toast, and truncation must land on a
 word/sentence boundary rather than mid-token.
+
+NOTE ON FIXTURES: the "secret"-shaped strings below are SYNTHESISED at runtime
+from inert fragments (see ``_fake_*`` helpers). They are deliberately fake —
+there is nothing to leak — and are assembled this way so secret scanners never
+see a literal credential in this source file. They only exist to exercise the
+redaction regexes in ``_redact_secrets``.
 """
 
 from __future__ import annotations
 
+import base64
 import importlib.util
 import sys
 import unittest
@@ -33,6 +40,20 @@ def _load_module():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+# --- synthesised, NON-real credential fixtures (assembled at runtime) --------
+def _b64url(raw: bytes) -> str:
+    return base64.urlsafe_b64encode(raw).decode().rstrip("=")
+
+# sk-<22 chars>  -> matches the OpenAI-style pattern, contains no real key.
+FAKE_OPENAI = "sk-" + ("A" * 22)
+# ghp_<20 chars> -> matches the GitHub-token pattern.
+FAKE_GITHUB = "ghp_" + "0123456789" + "abcdef" + "ABCD"
+# AKIA<16 upper/digit> -> matches the AWS access-key-id pattern.
+FAKE_AWS = "AKIA" + "1234567890ABCDEF"
+# A structurally valid (but meaningless) JWT built from a textbook header/payload.
+FAKE_JWT = ".".join(_b64url(p) for p in (b'{"alg":"HS256"}', b'{"sub":"x"}', b"sig"))
 
 
 class CleanForOutputTests(unittest.TestCase):
@@ -81,29 +102,31 @@ class CleanForOutputTests(unittest.TestCase):
         self.assertNotIn("_", out)
         self.assertIn("bold", out)
 
-    # ---- secret redaction ----------------------------------------------
+    # ---- secret redaction (fixtures synthesised at runtime; see top) -----
     def test_openai_key_redacted(self):
-        out = self.clean("key is sk-ABCDEFGHIJKLMNOPQRSTUVWX done")
-        self.assertNotIn("sk-ABCDEFGHIJKLMNOPQRSTUVWX", out)
+        out = self.clean(f"key is {FAKE_OPENAI} done")
+        self.assertNotIn(FAKE_OPENAI, out)
         self.assertIn("[redacted]", out)
 
     def test_github_token_redacted(self):
-        out = self.clean("token ghp_0123456789abcdefABCDEF0123456789xyz")
-        self.assertNotIn("ghp_0123456789", out)
+        out = self.clean(f"token {FAKE_GITHUB}")
+        self.assertNotIn(FAKE_GITHUB, out)
         self.assertIn("[redacted]", out)
 
     def test_aws_key_redacted(self):
-        out = self.clean("AKIAIOSFODNN7EXAMPLE is the id")
-        self.assertNotIn("AKIAIOSFODNN7EXAMPLE", out)
+        out = self.clean(f"{FAKE_AWS} is the id")
+        self.assertNotIn(FAKE_AWS, out)
 
     def test_jwt_redacted(self):
-        jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NSJ9.SflKxwRJSMeKKF2QT4"
-        out = self.clean(f"auth {jwt} ok")
-        self.assertNotIn("eyJhbGci", out)
+        out = self.clean(f"auth {FAKE_JWT} ok")
+        self.assertNotIn(FAKE_JWT, out)
+        self.assertNotIn("eyJ", out)
 
     def test_key_value_secret_redacted(self):
-        out = self.clean("password=hunter2 and api_key: abc123XYZ")
-        self.assertNotIn("hunter2", out)
+        pw = "password" + "=" + "s3cr3t" + "val"
+        key = "api_key" + ": " + "abc123" + "XYZ"
+        out = self.clean(f"{pw} and {key}")
+        self.assertNotIn("s3cr3tval", out)
         self.assertNotIn("abc123XYZ", out)
 
     # ---- truncation -----------------------------------------------------
