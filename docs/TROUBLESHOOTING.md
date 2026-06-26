@@ -287,7 +287,8 @@ Issues: https://github.com/ChanMeng666/echook/issues
 
 ## See also
 
-- [README.md](../README.md) — public introduction with the full `audio-hooks` CLI reference
+- [README.md](../README.md) — public introduction (features, value, mermaid diagrams)
+- [docs/CLI_REFERENCE.md](CLI_REFERENCE.md) — the full `audio-hooks` CLI + config + error-code reference
 - [CLAUDE.md](../CLAUDE.md) — canonical AI-facing operating guide
 - [docs/ARCHITECTURE.md](ARCHITECTURE.md) — developer-facing architecture deep dive
 - `audio-hooks manifest` — live machine description of every subcommand and config key (always up to date)
