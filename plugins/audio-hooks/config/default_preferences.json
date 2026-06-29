@@ -167,8 +167,12 @@
   },
 
   "statusline_settings": {
-    "_comment": "Controls which segments appear in the Claude Code status line. Set visible_segments to an array of segment names to show only those. Available: model, effort, cc_version, cwd, version, sounds, webhook, theme (line 1); snooze, branch, api_quota, weekly_quota, context, cost (line 2). effort/cc_version/weekly_quota/cost mirror the Claude Code startup banner. Empty array or omission shows all segments. Each line auto-reflows into as many rows as the terminal width needs so nothing is truncated; max_width pins that width (0 = auto-detect via the COLUMNS env var Claude Code provides).",
+    "_comment": "Controls which segments appear in the Claude Code status line. Available — line 1 (identity/config): model, session_name, agent, effort, thinking, vim, output_style, cc_version, cwd, repo, version, sounds, webhook, theme. Line 2 (live state/metrics): snooze, branch, git_dirty, worktree, pr, added_dirs, api_quota, weekly_quota, context, tokens, exceeds_200k, cost, duration, api_time, burn_rate. Most richer segments render only when their data is present. Run 'audio-hooks statusline segments' for the full catalog.",
+    "_comment_visible": "Whitelist: when non-empty, ONLY these segments show. Empty = show everything (minus hidden_segments). Back-compat: existing configs keep working.",
     "visible_segments": [],
+    "_comment_hidden": "Blacklist applied only when visible_segments is empty: show everything EXCEPT these. Lets you drop a few segments without enumerating all the keepers.",
+    "hidden_segments": [],
+    "_comment_max_width": "Each line auto-reflows into as many rows as the terminal width needs so nothing is truncated; max_width pins that width (0 = auto-detect via the COLUMNS env var Claude Code provides).",
     "max_width": 0
   },
 

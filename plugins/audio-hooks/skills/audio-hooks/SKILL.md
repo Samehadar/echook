@@ -144,12 +144,16 @@ The status line pins the key facts from Claude Code's **startup banner** so they
 
 **Customise which status line segments to show**
 
-The status line has 14 segments the user can freely combine. By default all are shown. Set `statusline_settings.visible_segments` to an array of segment names to show only those:
+The status line exposes **29 segments** — every useful field Claude Code pipes to a status line script. By default all are shown (most richer ones self-omit when their data is absent, so a plain session stays clean). Run **`audio-hooks statusline segments`** for the authoritative live catalog (name, line, source field, conditional flag).
 
-Line 1 segments: `model`, `effort`, `cc_version`, `cwd`, `version`, `sounds`, `webhook`, `theme`
-Line 2 segments: `snooze`, `branch`, `api_quota`, `weekly_quota`, `context`, `cost`
+Line 1 (identity / config): `model`, `session_name`, `agent`, `effort`, `thinking`, `vim`, `output_style`, `cc_version`, `cwd`, `repo`, `version`, `sounds`, `webhook`, `theme`
+Line 2 (live state / metrics): `snooze`, `branch`, `git_dirty`, `worktree`, `pr`, `added_dirs`, `api_quota`, `weekly_quota`, `context`, `tokens`, `exceeds_200k`, `cost`, `duration`, `api_time`, `burn_rate`
 
-(`effort`, `cc_version`, `weekly_quota`, and `cost` are the banner-parity segments. Quota/cost/effort segments self-omit when Claude Code doesn't supply that data — e.g. `weekly_quota` is blank for non-subscribers, `effort` is blank on models without reasoning effort.)
+Two ways to choose segments:
+- **`visible_segments`** (whitelist) — when non-empty, *only* these show. Best when the user wants a short, fixed line.
+- **`hidden_segments`** (blacklist) — applied only when `visible_segments` is empty: show everything *except* these. Best when the user likes the comprehensive default but wants to drop a couple (e.g. `audio-hooks set statusline_settings.hidden_segments '["burn_rate","api_time"]'`).
+
+(`git_dirty` shells out to `git status --porcelain`, cached ~5s; everything else comes from the stdin session JSON. Conditional segments self-omit when Claude Code doesn't supply that data — e.g. `pr` only inside a PR, `vim` only in vim mode, `weekly_quota` only for Claude.ai subscribers, `output_style` only when not the default.)
 
 **Auto-reflow (no truncation).** Each line automatically wraps into as many rows as the terminal width needs — segments are never split, so a content-rich status line shows in full instead of being cut off with an ellipsis (`Webho…`). Width is read from the `COLUMNS` env var Claude Code provides (Claude Code v2.1.153+), falling back to 80 columns. If a user wants fewer rows, trim segments with `visible_segments`. To pin the wrap width explicitly (e.g. when `COLUMNS` is unreliable), set `statusline_settings.max_width` to a column count (`0` = auto):
 
@@ -172,6 +176,11 @@ Line 2 segments: `snooze`, `branch`, `api_quota`, `weekly_quota`, `context`, `co
 | "show everything in the status line" (reset) | `audio-hooks set statusline_settings.visible_segments '[]'` |
 | "add webhook to the status line" | Read current with `audio-hooks get statusline_settings.visible_segments`, append `"webhook"` to the array, then set the updated array |
 | "remove sounds count from status line" | Read current, remove `"sounds"`, set the updated array |
+| "show session duration / how long I've been running" | add `"duration"` (it's on by default; if hidden, remove from `hidden_segments`) |
+| "show cost per hour / burn rate" | `burn_rate` (on by default) |
+| "show uncommitted git changes" | `git_dirty` (on by default) |
+| "hide burn rate and api time but keep everything else" | `audio-hooks set statusline_settings.hidden_segments '["burn_rate","api_time"]'` |
+| "what segments are available?" | `audio-hooks statusline segments` |
 
 Examples of what the user sees after customisation:
 ```
@@ -185,6 +194,22 @@ Examples of what the user sees after customisation:
 [Opus]
 🌿 main  █████░░░ Context: 65% ⚠️ /compact
 ```
+
+**Codex status line (curation only — NOT rendered by echook)**
+
+Unlike Claude Code, **Codex does not support a command-backed status line**. Codex renders only *fixed lists of built-in item IDs* configured under `[tui].status_line` and `[tui].terminal_title` in `~/.codex/config.toml` (command rendering is open feature request openai/codex#20140). echook therefore cannot inject custom segments into Codex — it can only **curate** those fixed lists so they stop truncating with an ellipsis (the common cause is a list with 20+ redundant items like `model-with-reasoning` + `model` + `reasoning`, or `context-remaining` + `context-used`, all crammed onto Codex's single line).
+
+| User says | Run |
+|---|---|
+| "my codex status bar is cut off / shows `…`" | `audio-hooks statusline codex apply --preset balanced` (then restart Codex / `/statusline`) |
+| "fix the codex tab/window title too / it's also crammed" | `audio-hooks statusline codex apply --target terminal_title --preset balanced` |
+| "fix both the codex status line and title" | `audio-hooks statusline codex apply --target both --preset balanced` |
+| "show me the current codex status line + title" | `audio-hooks statusline codex show` |
+| "preview before applying" | `audio-hooks statusline codex preview --preset full --target both` |
+| "give me a minimal / full codex status line" | `audio-hooks statusline codex apply --preset minimal` \| `--preset full` |
+| "use these exact codex items" | `audio-hooks statusline codex apply --items model-with-reasoning,git-branch,context-remaining` |
+
+`--target` selects which `[tui]` array to curate: `status_line` (default), `terminal_title`, or `both`. Presets — status line: `minimal` (4), `balanced` (8, recommended), `full` (14); terminal title: `minimal` (2), `balanced` (4), `full` (6). `apply` backs up `config.toml` first and surgically edits *only* the targeted array(s) (all other tables/comments preserved). `--items` overrides the preset for a single target.
 
 **Notification settings (audio mode, detail level, per-hook overrides)**
 

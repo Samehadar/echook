@@ -787,5 +787,202 @@ class TestDebugDump(_StatuslineRenderBase):
         self.assertEqual(leftovers, [])
 
 
+class TestNewSegments(_StatuslineRenderBase):
+    """The v6.3 segment catalog: each new segment renders when its field is
+    present and is silently absent otherwise (so the comprehensive default
+    stays clean on a plain session)."""
+
+    def test_session_name_agent_thinking_output_style(self):
+        payload = {
+            "session_id": "t",
+            "session_name": "my-feature",
+            "agent": {"name": "security-reviewer"},
+            "thinking": {"enabled": True},
+            "output_style": {"name": "Explanatory"},
+        }
+        rc, out, _ = _run(json.dumps(payload), state_dir=self.tmp)
+        self.assertEqual(rc, 0)
+        self.assertIn("my-feature", out)
+        self.assertIn("security-reviewer", out)
+        self.assertIn("thinking", out)
+        self.assertIn("Explanatory", out)
+
+    def test_output_style_default_is_hidden(self):
+        payload = {"session_id": "t", "output_style": {"name": "default"}}
+        rc, out, _ = _run(json.dumps(payload), state_dir=self.tmp)
+        self.assertEqual(rc, 0)
+        self.assertNotIn("\U0001f3a8", out)  # palette emoji absent
+
+    def test_repo_segment(self):
+        payload = {
+            "session_id": "t",
+            "workspace": {"repo": {"owner": "ChanMeng666", "name": "echook"}},
+        }
+        rc, out, _ = _run(json.dumps(payload), state_dir=self.tmp)
+        self.assertEqual(rc, 0)
+        self.assertIn("ChanMeng666/echook", out)
+
+    def test_pr_and_added_dirs_and_worktree(self):
+        payload = {
+            "session_id": "t",
+            "pr": {"number": 1234, "review_state": "pending"},
+            "workspace": {"added_dirs": ["/a", "/b"]},
+            "worktree": {"name": "wt-feature"},
+        }
+        rc, out, _ = _run(json.dumps(payload), state_dir=self.tmp)
+        self.assertEqual(rc, 0)
+        self.assertIn("PR #1234 (pending)", out)
+        self.assertIn("+2 dirs", out)
+        self.assertIn("wt-feature", out)
+
+    def test_duration_api_time_burn_rate(self):
+        payload = {
+            "session_id": "t",
+            "cost": {
+                "total_cost_usd": 6.0,
+                "total_duration_ms": 720000,       # 12 minutes
+                "total_api_duration_ms": 180000,   # 25% of wall
+            },
+        }
+        rc, out, _ = _run(json.dumps(payload), state_dir=self.tmp)
+        self.assertEqual(rc, 0)
+        self.assertIn("12m", out)
+        self.assertIn("API 25%", out)
+        self.assertIn("$30.00/h", out)  # $6 over 0.2h
+
+    def test_burn_rate_absent_for_short_session(self):
+        payload = {
+            "session_id": "t",
+            "cost": {"total_cost_usd": 6.0, "total_duration_ms": 5000},  # 5s
+        }
+        rc, out, _ = _run(json.dumps(payload), state_dir=self.tmp)
+        self.assertEqual(rc, 0)
+        self.assertNotIn("/h", out)
+
+    def test_tokens_cache_ratio(self):
+        payload = {
+            "session_id": "t",
+            "context_window": {
+                "used_percentage": 40,
+                "current_usage": {
+                    "input_tokens": 1000,
+                    "cache_creation_input_tokens": 0,
+                    "cache_read_input_tokens": 9000,
+                },
+            },
+        }
+        rc, out, _ = _run(json.dumps(payload), state_dir=self.tmp)
+        self.assertEqual(rc, 0)
+        self.assertIn("cache 90%", out)
+
+    def test_exceeds_200k_flag(self):
+        payload = {"session_id": "t", "exceeds_200k_tokens": True}
+        rc, out, _ = _run(json.dumps(payload), state_dir=self.tmp)
+        self.assertEqual(rc, 0)
+        self.assertIn(">200K", out)
+
+    def test_new_segments_absent_on_plain_session(self):
+        payload = {"session_id": "t", "model": {"display_name": "Opus"}}
+        rc, out, _ = _run(json.dumps(payload), state_dir=self.tmp)
+        self.assertEqual(rc, 0)
+        for token in ("PR #", "thinking", "/h", ">200K", "cache ", "dirs"):
+            self.assertNotIn(token, out)
+
+
+class TestHiddenSegments(_StatuslineRenderBase):
+    """``hidden_segments`` is a blacklist applied when ``visible_segments`` is
+    empty: show everything except the listed names."""
+
+    def _set_hidden(self, hidden):
+        status = dict(self._MINIMAL_STATUS)
+        status["statusline"] = {"visible_segments": [], "hidden_segments": hidden}
+        for sid in ("t", "default"):
+            (self.tmp / f"statusline.cache.{sid}").write_text(
+                json.dumps(status), encoding="utf-8"
+            )
+
+    def test_hidden_segment_dropped_others_kept(self):
+        self._set_hidden(["cost"])
+        payload = {
+            "session_id": "t",
+            "cost": {"total_cost_usd": 1.5},
+            "context_window": {"used_percentage": 40, "context_window_size": 200000},
+        }
+        rc, out, _ = _run(json.dumps(payload), state_dir=self.tmp)
+        self.assertEqual(rc, 0)
+        self.assertNotIn("$1.50", out)
+        self.assertIn("Context: 40%", out)  # other segments still show
+
+    def test_visible_segments_takes_precedence_over_hidden(self):
+        # When visible_segments is non-empty it wins; hidden_segments ignored.
+        status = dict(self._MINIMAL_STATUS)
+        status["statusline"] = {
+            "visible_segments": ["context"], "hidden_segments": ["context"]
+        }
+        for sid in ("t", "default"):
+            (self.tmp / f"statusline.cache.{sid}").write_text(
+                json.dumps(status), encoding="utf-8"
+            )
+        payload = {
+            "session_id": "t",
+            "context_window": {"used_percentage": 40, "context_window_size": 200000},
+        }
+        rc, out, _ = _run(json.dumps(payload), state_dir=self.tmp)
+        self.assertEqual(rc, 0)
+        self.assertIn("Context: 40%", out)
+
+
+class TestGitDirty(unittest.TestCase):
+    """``_git_dirty`` shells out once and caches; non-repos cache -1 (=> None)
+    so they don't re-shell. The cache file is the deterministic test hook."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.mod = _load_module()
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="gitdirty_"))
+        os.environ["CLAUDE_AUDIO_HOOKS_DATA"] = str(self.tmp)
+
+    def tearDown(self):
+        os.environ.pop("CLAUDE_AUDIO_HOOKS_DATA", None)
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_none_for_missing_cwd(self):
+        self.assertIsNone(self.mod._git_dirty(None))
+        self.assertIsNone(self.mod._git_dirty(""))
+
+    def test_cached_value_is_read(self):
+        import hashlib
+        cwd = "/some/project"
+        key = hashlib.md5(os.fsencode(cwd)).hexdigest()[:12]
+        (self.tmp / f"statusline.git.{key}").write_text("7", encoding="utf-8")
+        self.assertEqual(self.mod._git_dirty(cwd), 7)
+
+    def test_cached_negative_means_not_a_repo(self):
+        import hashlib
+        cwd = "/not/a/repo"
+        key = hashlib.md5(os.fsencode(cwd)).hexdigest()[:12]
+        (self.tmp / f"statusline.git.{key}").write_text("-1", encoding="utf-8")
+        self.assertIsNone(self.mod._git_dirty(cwd))
+
+
+class TestDurationHelper(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.mod = _load_module()
+
+    def test_formats(self):
+        self.assertEqual(self.mod._format_duration_ms(5000), "5s")
+        self.assertEqual(self.mod._format_duration_ms(120000), "2m")
+        self.assertEqual(self.mod._format_duration_ms(3600000), "1h")
+        self.assertEqual(self.mod._format_duration_ms(5400000), "1h30m")
+
+    def test_bad_input_blank(self):
+        for v in (None, "x", {}, -1000):
+            with self.subTest(value=v):
+                self.assertEqual(self.mod._format_duration_ms(v), "")
+
+
 if __name__ == "__main__":
     unittest.main()

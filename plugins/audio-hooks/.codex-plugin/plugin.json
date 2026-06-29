@@ -1,6 +1,6 @@
 {
   "name": "audio-hooks",
-  "version": "6.2.0",
+  "version": "6.3.0",
   "description": "Audio notifications and system alerts for Claude Code, Cursor IDE, and Codex events.",
   "author": {
     "name": "Chan Meng",

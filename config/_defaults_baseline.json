@@ -128,8 +128,9 @@
   },
 
   "statusline_settings": {
-    "_comment": "Controls which segments appear in the Claude Code status line. Set visible_segments to an array of segment names to show only those. Empty array or omission shows all segments.",
-    "visible_segments": []
+    "_comment": "Controls which segments appear in the Claude Code status line. visible_segments is a whitelist (empty = show all); hidden_segments is a blacklist applied when visible_segments is empty. Run 'audio-hooks statusline segments' for the catalog.",
+    "visible_segments": [],
+    "hidden_segments": []
   },
 
   "tts_settings": {

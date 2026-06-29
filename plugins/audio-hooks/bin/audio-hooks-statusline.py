@@ -8,14 +8,36 @@ When the array is empty (default) every segment is shown.
 
 Available segments
 ------------------
-Line 1: model, effort, cc_version, cwd, version, sounds, webhook, theme
-Line 2: snooze, branch, api_quota, weekly_quota, context, cost
+Line 1 (identity / config):
+  model, session_name, agent, effort, thinking, vim, output_style, cc_version,
+  cwd, repo, version, sounds, webhook, theme
+Line 2 (live state / metrics):
+  snooze, branch, git_dirty, worktree, pr, added_dirs, api_quota, weekly_quota,
+  context, tokens, exceeds_200k, cost, duration, api_time, burn_rate
+
+Every segment maps to a field Claude Code pipes on stdin (see
+https://code.claude.com/docs/en/statusline). Most of the richer segments render
+*only when their data is present* (e.g. ``pr`` only inside a PR, ``vim`` only in
+vim mode, ``output_style`` only when not the default), so the default — show
+everything — stays uncluttered for a plain session yet exposes the full picture
+when the data exists.
 
 ``effort``, ``cc_version`` (Claude Code's own version), ``weekly_quota`` (the
 7-day rate-limit window + reset time) and ``cost`` mirror the Claude Code
 startup banner so that information stays visible after it scrolls off the top
 of the terminal. The subscription plan name ("Claude Max"/"Pro") is *not*
 piped to status line scripts, so it is intentionally not shown.
+
+Segment selection
+-----------------
+Two config keys (under ``statusline_settings``) control which segments appear:
+  - ``visible_segments`` — a *whitelist*. When non-empty, only these show
+    (back-compat behaviour). Order within a line still follows the canonical
+    LINE1/LINE2 order, not the list order.
+  - ``hidden_segments`` — a *blacklist*. Applied only when ``visible_segments``
+    is empty: every available segment shows except these. This lets a user drop
+    a couple of segments from the comprehensive default without having to
+    enumerate all the ones they want to keep.
 
 The ``cwd`` segment shows the current working directory as an abbreviated
 path (home folder collapsed to ``~``; long paths shortened to
@@ -41,6 +63,7 @@ Hard rules:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -71,12 +94,16 @@ CACHE_TTL_SEC = 5
 # pin it exactly via `statusline_settings.max_width`.
 WIDTH_SAFETY_MARGIN = 4
 
-ALL_SEGMENTS = {"model", "effort", "cc_version", "cwd", "version", "sounds",
-                "webhook", "theme",
-                "snooze", "branch", "api_quota", "weekly_quota", "context", "cost"}
-LINE1_SEGMENTS = {"model", "effort", "cc_version", "cwd", "version", "sounds",
-                  "webhook", "theme"}
-LINE2_SEGMENTS = {"snooze", "branch", "api_quota", "weekly_quota", "context", "cost"}
+# Line 1 — identity / configuration (mostly static within a session).
+LINE1_SEGMENTS = ["model", "session_name", "agent", "effort", "thinking", "vim",
+                  "output_style", "cc_version", "cwd", "repo", "version", "sounds",
+                  "webhook", "theme"]
+# Line 2 — live state / metrics (change as the session runs).
+LINE2_SEGMENTS = ["snooze", "branch", "git_dirty", "worktree", "pr", "added_dirs",
+                  "api_quota", "weekly_quota", "context", "tokens", "exceeds_200k",
+                  "cost", "duration", "api_time", "burn_rate"]
+# Order is preserved for rendering; the set is used for membership tests.
+ALL_SEGMENTS = set(LINE1_SEGMENTS) | set(LINE2_SEGMENTS)
 
 # Backwards compatibility: accept old segment names from existing configs
 _SEGMENT_ALIASES = {"hooks": "sounds", "rate_limit": "rate-limit", "ctx": "context"}
@@ -169,6 +196,70 @@ def _format_remaining(seconds: int) -> str:
     h = seconds // 3600
     m = (seconds % 3600) // 60
     return f"{h}h{m}m" if m else f"{h}h"
+
+
+def _format_duration_ms(ms: Any) -> str:
+    """Render a millisecond duration as a compact human string (e.g. 45000 ->
+    ``45s``, 720000 -> ``12m``). Returns "" on absent/invalid input — must never
+    raise. Reuses the ``_format_remaining`` rounding so durations and snooze
+    countdowns read identically.
+    """
+    try:
+        seconds = int(float(ms)) // 1000
+    except (TypeError, ValueError):
+        return ""
+    if seconds < 0:
+        return ""
+    return _format_remaining(seconds)
+
+
+def _git_dirty(cwd: Optional[str]) -> Optional[int]:
+    """Return the number of uncommitted changes in ``cwd``'s git repo.
+
+    ``branch`` already comes from the session JSON (``workspace.git_worktree``);
+    the *dirty count* is not piped, so this is the one segment that shells out.
+    The result is cached per-cwd for ``CACHE_TTL_SEC`` exactly like
+    ``_get_status`` so a fast-refreshing status line doesn't spawn ``git`` on
+    every keystroke.
+
+    Returns ``None`` when ``cwd`` is missing, ``git`` is unavailable, or the
+    directory is not a repo (that case is cached as ``-1`` so non-repos don't
+    re-shell each render). Never raises — the status line degrades silently.
+    """
+    if not cwd:
+        return None
+    # hashlib (not the salted built-in hash()) so the cache filename is stable
+    # across the separate processes Claude Code spawns per refresh.
+    key = hashlib.md5(os.fsencode(cwd)).hexdigest()[:12]
+    cache = _state_dir() / f"statusline.git.{key}"
+    now = time.time()
+    if cache.exists():
+        try:
+            if now - cache.stat().st_mtime < CACHE_TTL_SEC:
+                v = int(cache.read_text(encoding="utf-8").strip())
+                return None if v < 0 else v
+        except (OSError, ValueError):
+            pass
+    count = -1
+    git = shutil.which("git")
+    if git:
+        try:
+            proc = subprocess.run(
+                [git, "-C", cwd, "status", "--porcelain"],
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                text=True,
+                timeout=2,
+            )
+            if proc.returncode == 0:
+                count = sum(1 for line in proc.stdout.splitlines() if line.strip())
+        except (subprocess.SubprocessError, OSError):
+            count = -1
+    try:
+        cache.write_text(str(count), encoding="utf-8")
+    except OSError:
+        pass
+    return None if count < 0 else count
 
 
 def _fmt_reset_clock(epoch: Any) -> str:
@@ -432,24 +523,48 @@ def main() -> int:
     cc_version = session.get("version")
 
     rate_limits = (session.get("rate_limits") or {}) if isinstance(session.get("rate_limits"), dict) else {}
-    git_worktree = (session.get("workspace") or {}).get("git_worktree") if isinstance(session.get("workspace"), dict) else None
+    workspace = session.get("workspace") if isinstance(session.get("workspace"), dict) else {}
+    git_worktree = workspace.get("git_worktree")
     ctx_window = session.get("context_window") or {}
     cost = (session.get("cost") or {}) if isinstance(session.get("cost"), dict) else {}
+
+    # Richer optional session fields (see code.claude.com/docs/en/statusline).
+    # Each is guarded so a missing or wrong-typed value simply omits its segment.
+    def _dict(name: str) -> Dict[str, Any]:
+        v = session.get(name)
+        return v if isinstance(v, dict) else {}
+
+    session_name = session.get("session_name") if isinstance(session.get("session_name"), str) else None
+    agent_name = _dict("agent").get("name")
+    thinking_on = bool(_dict("thinking").get("enabled"))
+    vim_mode = _dict("vim").get("mode")
+    output_style = _dict("output_style").get("name")
+    repo = workspace.get("repo") if isinstance(workspace.get("repo"), dict) else {}
+    added_dirs = workspace.get("added_dirs") if isinstance(workspace.get("added_dirs"), list) else []
+    pr = _dict("pr")
+    worktree = _dict("worktree")
+    exceeds_200k = bool(session.get("exceeds_200k_tokens"))
 
     # Current working directory: prefer the top-level `cwd` Claude Code pipes
     # in, falling back to workspace.current_dir / project_dir.
     cwd = session.get("cwd")
     if not (isinstance(cwd, str) and cwd):
-        ws = session.get("workspace") if isinstance(session.get("workspace"), dict) else {}
-        cwd = ws.get("current_dir") or ws.get("project_dir")
+        cwd = workspace.get("current_dir") or workspace.get("project_dir")
     cwd = cwd if isinstance(cwd, str) and cwd else None
 
     status = _get_status(session_id)
 
-    # Determine which segments to show
+    # Determine which segments to show. `visible_segments` is a whitelist
+    # (back-compat: when set, only those show). When it is empty the default is
+    # "everything", minus any `hidden_segments` blacklist — so a user can drop a
+    # couple of segments without enumerating all the ones they want to keep.
     sl_cfg = (status.get("statusline") or {}) if status else {}
     raw_vis = sl_cfg.get("visible_segments") or []
-    visible = _normalise_segments(raw_vis) if raw_vis else ALL_SEGMENTS
+    if raw_vis:
+        visible = _normalise_segments(raw_vis)
+    else:
+        hidden = _normalise_segments(sl_cfg.get("hidden_segments") or [])
+        visible = ALL_SEGMENTS - hidden
 
     def show(segment: str) -> bool:
         return segment in visible
@@ -479,12 +594,24 @@ def main() -> int:
     l1_parts = []
     if show("model"):
         l1_parts.append(f"{CYAN}[{model}]{RESET}")
+    if show("session_name") and session_name:
+        l1_parts.append(f"\U0001f3f7 {session_name}")
+    if show("agent") and isinstance(agent_name, str) and agent_name:
+        l1_parts.append(f"\U0001f916 {agent_name}")
     if show("effort") and effort:
         l1_parts.append(f"\U0001f9e0 {effort}")
+    if show("thinking") and thinking_on:
+        l1_parts.append("\U0001f4ad thinking")
+    if show("vim") and isinstance(vim_mode, str) and vim_mode:
+        l1_parts.append(f"vim:{vim_mode}")
+    if show("output_style") and isinstance(output_style, str) and output_style and output_style != "default":
+        l1_parts.append(f"\U0001f3a8 {output_style}")
     if show("cc_version") and cc_version:
         l1_parts.append(f"⚡ CC v{cc_version}")
     if show("cwd") and cwd:
         l1_parts.append(f"\U0001f4c1 {_abbrev_path(cwd)}")
+    if show("repo") and repo.get("owner") and repo.get("name"):
+        l1_parts.append(f"{repo.get('owner')}/{repo.get('name')}")
     if show("version"):
         l1_parts.append(f"\U0001f50a echook v{version}")
     if show("sounds"):
@@ -510,6 +637,25 @@ def main() -> int:
 
     if show("branch") and git_worktree:
         parts.append(f"\U0001f33f {git_worktree}")
+
+    if show("git_dirty") and cwd:
+        dirty = _git_dirty(cwd)
+        if dirty is not None:
+            if dirty:
+                parts.append(f"{YELLOW}±{dirty}{RESET}")
+            else:
+                parts.append(f"{GREEN}✓ clean{RESET}")
+
+    if show("worktree") and (worktree.get("name") or worktree.get("branch")):
+        parts.append(f"\U0001f333 {worktree.get('name') or worktree.get('branch')}")
+
+    if show("pr") and pr.get("number"):
+        state = pr.get("review_state")
+        state_str = f" ({state})" if isinstance(state, str) and state else ""
+        parts.append(f"PR #{pr.get('number')}{state_str}")
+
+    if show("added_dirs") and added_dirs:
+        parts.append(f"+{len(added_dirs)} dirs")
 
     if show("api_quota"):
         five_hour = (rate_limits.get("five_hour") or {}) if isinstance(rate_limits, dict) else {}
@@ -564,6 +710,25 @@ def main() -> int:
             except (TypeError, ValueError):
                 pass
 
+    if show("tokens"):
+        # Cache-hit ratio from the last API call: cache_read ÷ total input.
+        # A high ratio means the session is reading mostly from cache (cheap);
+        # a low ratio means fresh input is being re-sent. Complements `context`.
+        usage = ctx_window.get("current_usage") if isinstance(ctx_window, dict) else None
+        if isinstance(usage, dict):
+            try:
+                cache_read = int(usage.get("cache_read_input_tokens") or 0)
+                fresh = int(usage.get("input_tokens") or 0)
+                cache_create = int(usage.get("cache_creation_input_tokens") or 0)
+                total_in = cache_read + fresh + cache_create
+                if total_in > 0:
+                    parts.append(f"cache {int(round(cache_read * 100.0 / total_in))}%")
+            except (TypeError, ValueError):
+                pass
+
+    if show("exceeds_200k") and exceeds_200k:
+        parts.append(f"{YELLOW}⚠ >200K{RESET}")
+
     if show("cost"):
         usd = cost.get("total_cost_usd")
         if usd is not None:
@@ -574,6 +739,33 @@ def main() -> int:
                 parts.append(f"\U0001f4b2 ${float(usd):.2f}{diff}")
             except (TypeError, ValueError):
                 pass
+
+    # Wall-clock session duration (from cost.total_duration_ms).
+    if show("duration"):
+        dur = _format_duration_ms(cost.get("total_duration_ms"))
+        if dur:
+            parts.append(f"\U0001f550 {dur}")
+
+    # Share of wall-clock spent waiting on the model API.
+    if show("api_time"):
+        try:
+            wall = float(cost.get("total_duration_ms") or 0)
+            api = float(cost.get("total_api_duration_ms") or 0)
+            if wall > 0 and api > 0:
+                parts.append(f"API {int(round(api * 100.0 / wall))}%")
+        except (TypeError, ValueError):
+            pass
+
+    # Cost velocity ($/hour) — only meaningful once the session has run a bit.
+    if show("burn_rate"):
+        try:
+            usd = float(cost.get("total_cost_usd") or 0)
+            wall_ms = float(cost.get("total_duration_ms") or 0)
+            if usd > 0 and wall_ms >= 60000:
+                rate = usd / (wall_ms / 3_600_000.0)
+                parts.append(f"${rate:.2f}/h")
+        except (TypeError, ValueError):
+            pass
 
     # Reflow Line 2 the same way — wrap at segment boundaries to fit the width.
     if parts:

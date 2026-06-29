@@ -28,7 +28,9 @@ Single Python binary on PATH. JSON output, no prompts, no spinners.
 | `audio-hooks diagnose` | System check |
 | `audio-hooks logs tail/clear` | NDJSON event log |
 | `audio-hooks install/uninstall` | Non-interactive install/uninstall |
-| `audio-hooks statusline show/install/uninstall` | Status line management |
+| `audio-hooks statusline show/install/uninstall` | Claude Code status line registration |
+| `audio-hooks statusline segments` | List all 29 Claude Code status line segments (name, line, source field, conditional) |
+| `audio-hooks statusline codex show/preview/apply` | Curate Codex `[tui].status_line` and/or `terminal_title` (`--preset minimal\|balanced\|full`, `--items a,b,c`, `--target status_line\|terminal_title\|both`). Codex accepts only fixed item IDs — echook curates, it cannot render custom text |
 
 ## Configuration Keys
 
@@ -49,7 +51,8 @@ Single Python binary on PATH. JSON output, no prompts, no spinners.
 | `rate_limit_alerts.enabled` | bool | `true` | Watch stdin rate_limits |
 | `rate_limit_alerts.five_hour_thresholds` | int[] | `[80, 95]` | 5h window thresholds |
 | `rate_limit_alerts.seven_day_thresholds` | int[] | `[80, 95]` | 7d window thresholds |
-| `statusline_settings.visible_segments` | string[] | `[]` (all) | Status line segments to show (any of: `model`, `effort`, `cc_version`, `cwd`, `version`, `sounds`, `webhook`, `theme`, `snooze`, `branch`, `api_quota`, `weekly_quota`, `context`, `cost`) |
+| `statusline_settings.visible_segments` | string[] | `[]` (all) | Whitelist: when non-empty, only these segments show. Run `audio-hooks statusline segments` for the full list of 29 names |
+| `statusline_settings.hidden_segments` | string[] | `[]` | Blacklist applied when `visible_segments` is empty: show all segments except these |
 | `statusline_settings.max_width` | int | `0` (auto) | Pin the reflow width in columns; `0` auto-detects via the `COLUMNS` env var Claude Code provides |
 
 ## Environment Variables

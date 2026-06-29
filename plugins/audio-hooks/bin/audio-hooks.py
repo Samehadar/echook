@@ -24,6 +24,7 @@ import json
 import os
 import platform
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -155,7 +156,7 @@ def require_project_root() -> int:
 # Project state — version, install detection, hook catalogue
 # ---------------------------------------------------------------------------
 
-PROJECT_VERSION = "6.2.0"
+PROJECT_VERSION = "6.3.0"
 
 # Canonical hook catalogue. Order matches CLAUDE.md and the install scripts.
 HOOK_CATALOG: List[Dict[str, Any]] = [
@@ -730,6 +731,7 @@ def cmd_status(_args: List[str]) -> int:
         "editor_targets": _detect_editor_targets(),
         "statusline": {
             "visible_segments": sl.get("visible_segments", []),
+            "hidden_segments": sl.get("hidden_segments", []),
             "max_width": sl.get("max_width", 0),
         },
         "customizations": customizations,
@@ -1888,12 +1890,409 @@ def _uninstall_cursor(*, purge: bool) -> int:
     return 0
 
 
+# ---------------------------------------------------------------------------
+# Status line catalog (Claude Code) + Codex curation
+# ---------------------------------------------------------------------------
+
+# Every segment the Claude Code status line script (bin/audio-hooks-statusline.py)
+# can render, with the stdin field it reads. `conditional` segments render only
+# when their data is present. Keep this in lock-step with the script's
+# LINE1_SEGMENTS / LINE2_SEGMENTS so `statusline segments` is authoritative.
+STATUSLINE_SEGMENTS: List[Dict[str, Any]] = [
+    {"name": "model", "line": 1, "source": "model.display_name", "conditional": False, "description": "Active model display name"},
+    {"name": "session_name", "line": 1, "source": "session_name", "conditional": True, "description": "Custom session name set via --name or /rename"},
+    {"name": "agent", "line": 1, "source": "agent.name", "conditional": True, "description": "Agent name when running with --agent"},
+    {"name": "effort", "line": 1, "source": "effort.level", "conditional": True, "description": "Reasoning effort (low/medium/high/xhigh/max)"},
+    {"name": "thinking", "line": 1, "source": "thinking.enabled", "conditional": True, "description": "Shown when extended thinking is enabled"},
+    {"name": "vim", "line": 1, "source": "vim.mode", "conditional": True, "description": "Vim editing mode (when vim mode is on)"},
+    {"name": "output_style", "line": 1, "source": "output_style.name", "conditional": True, "description": "Active output style (hidden when 'default')"},
+    {"name": "cc_version", "line": 1, "source": "version", "conditional": True, "description": "Claude Code's own version"},
+    {"name": "cwd", "line": 1, "source": "cwd", "conditional": True, "description": "Working directory (abbreviated)"},
+    {"name": "repo", "line": 1, "source": "workspace.repo", "conditional": True, "description": "Git remote owner/name"},
+    {"name": "version", "line": 1, "source": "audio-hooks status", "conditional": False, "description": "echook version"},
+    {"name": "sounds", "line": 1, "source": "audio-hooks status", "conditional": False, "description": "Enabled / total sound hooks"},
+    {"name": "webhook", "line": 1, "source": "audio-hooks status", "conditional": False, "description": "Webhook on/off + format"},
+    {"name": "theme", "line": 1, "source": "audio-hooks status", "conditional": False, "description": "Audio theme (Voice/Chimes)"},
+    {"name": "snooze", "line": 2, "source": "audio-hooks status", "conditional": True, "description": "Mute countdown when snoozed"},
+    {"name": "branch", "line": 2, "source": "workspace.git_worktree", "conditional": True, "description": "Git branch / worktree"},
+    {"name": "git_dirty", "line": 2, "source": "git status --porcelain", "conditional": True, "description": "Uncommitted-change count (shells out to git; cached)"},
+    {"name": "worktree", "line": 2, "source": "worktree.name", "conditional": True, "description": "Managed worktree name"},
+    {"name": "pr", "line": 2, "source": "pr.number", "conditional": True, "description": "Pull request number + review state"},
+    {"name": "added_dirs", "line": 2, "source": "workspace.added_dirs", "conditional": True, "description": "Count of /add-dir directories"},
+    {"name": "api_quota", "line": 2, "source": "rate_limits.five_hour", "conditional": True, "description": "5-hour rate-limit usage + reset clock"},
+    {"name": "weekly_quota", "line": 2, "source": "rate_limits.seven_day", "conditional": True, "description": "7-day rate-limit usage + reset clock"},
+    {"name": "context", "line": 2, "source": "context_window", "conditional": True, "description": "Context-window usage % + token counts"},
+    {"name": "tokens", "line": 2, "source": "context_window.current_usage", "conditional": True, "description": "Cache-hit ratio (cache reads ÷ input)"},
+    {"name": "exceeds_200k", "line": 2, "source": "exceeds_200k_tokens", "conditional": True, "description": "Warning flag when tokens exceed 200K"},
+    {"name": "cost", "line": 2, "source": "cost.total_cost_usd", "conditional": True, "description": "Session cost + lines added/removed"},
+    {"name": "duration", "line": 2, "source": "cost.total_duration_ms", "conditional": True, "description": "Wall-clock session duration"},
+    {"name": "api_time", "line": 2, "source": "cost.total_api_duration_ms", "conditional": True, "description": "Share of wall-clock spent waiting on the API"},
+    {"name": "burn_rate", "line": 2, "source": "derived", "conditional": True, "description": "Cost velocity ($/hour)"},
+]
+
+# Codex's status line is NOT command-backed: it accepts only a fixed, ordered
+# list of built-in item IDs under [tui].status_line in config.toml (command
+# rendering is open feature request openai/codex#20140). echook can therefore
+# only *curate* that list. These presets are de-duplicated and ordered to fit
+# Codex's single rendered line so it no longer truncates with an ellipsis.
+CODEX_STATUSLINE_PRESETS: Dict[str, List[str]] = {
+    "minimal": [
+        "model-with-reasoning", "git-branch", "approval-mode", "context-remaining",
+    ],
+    "balanced": [
+        "model-with-reasoning", "git-branch", "branch-changes", "approval-mode",
+        "context-remaining", "five-hour-limit", "weekly-limit", "codex-version",
+    ],
+    "full": [
+        "model-with-reasoning", "project-name", "git-branch", "branch-changes",
+        "pull-request-number", "run-state", "approval-mode", "context-remaining",
+        "used-tokens", "context-window-size", "five-hour-limit", "weekly-limit",
+        "codex-version", "task-progress",
+    ],
+}
+
+# The terminal title (tab/window title) shares the same item-ID family and the
+# same redundancy/truncation problem — a title is short, so a 20-item list is
+# pointless. These presets keep it to what identifies the tab at a glance.
+CODEX_TERMINAL_TITLE_PRESETS: Dict[str, List[str]] = {
+    "minimal": ["project-name", "git-branch"],
+    "balanced": ["activity", "project-name", "git-branch", "run-state"],
+    "full": [
+        "activity", "project-name", "git-branch", "run-state",
+        "model-with-reasoning", "context-remaining",
+    ],
+}
+
+# Which [tui] array each --target curates, and its preset table.
+CODEX_TUI_TARGETS: Dict[str, Dict[str, Any]] = {
+    "status_line": {"key": "status_line", "presets": CODEX_STATUSLINE_PRESETS},
+    "terminal_title": {"key": "terminal_title", "presets": CODEX_TERMINAL_TITLE_PRESETS},
+}
+
+
+def _codex_tui_array(key: str, items: List[str]) -> str:
+    """Render a TOML ``<key> = [...]`` assignment for the given item IDs."""
+    inner = ", ".join('"%s"' % i for i in items)
+    return "%s = [%s]" % (key, inner)
+
+
+def _codex_read_tui_array(text: str, key: str = "status_line") -> Optional[List[str]]:
+    """Return the current ``[tui].<key>`` array from config TOML text.
+
+    Uses ``tomllib`` when available (Python 3.11+); falls back to a tolerant
+    line scan. Returns ``None`` when absent or unparseable.
+    """
+    try:
+        import tomllib  # type: ignore
+        try:
+            data = tomllib.loads(text)
+        except Exception:
+            return None
+        tui = data.get("tui") if isinstance(data, dict) else None
+        val = tui.get(key) if isinstance(tui, dict) else None
+        return val if isinstance(val, list) else None
+    except ImportError:
+        in_tui = False
+        buf = ""
+        collecting = False
+        assign = re.compile(r"^%s\s*=" % re.escape(key))
+        for line in text.splitlines():
+            stripped = line.strip()
+            m = re.match(r"^\[([^\]]+)\]\s*$", stripped)
+            if m:
+                in_tui = m.group(1).strip() == "tui"
+                continue
+            if not in_tui:
+                continue
+            if not collecting and assign.match(stripped):
+                buf = stripped.split("=", 1)[1].strip()
+                collecting = True
+                if buf.count("[") <= buf.count("]"):
+                    break
+                continue
+            if collecting:
+                buf += " " + stripped
+                if buf.count("[") <= buf.count("]"):
+                    break
+        if not collecting:
+            return None
+        items = re.findall(r'"([^"]*)"', buf)
+        return items or []
+
+
+def _codex_apply_tui_array(text: str, key: str, items: List[str]) -> str:
+    """Return config.toml text with ``[tui].<key>`` set to ``items``.
+
+    Surgical: only the ``<key>`` array (and, if missing, a ``[tui]`` header) is
+    touched. All other tables, comments, and formatting are preserved verbatim —
+    this is deliberately NOT a parse-and-rewrite, so the user's config.toml
+    round-trips byte-for-byte apart from the one array.
+    """
+    new_line = _codex_tui_array(key, items)
+    lines = text.splitlines(keepends=True)
+    header_re = re.compile(r"^\s*\[([^\]]+)\]\s*$")
+    tui_start: Optional[int] = None
+    tui_end = len(lines)
+    for i, ln in enumerate(lines):
+        m = header_re.match(ln)
+        if not m:
+            continue
+        name = m.group(1).strip()
+        if tui_start is None and name == "tui":
+            tui_start = i
+        elif tui_start is not None and i > tui_start:
+            tui_end = i
+            break
+
+    if tui_start is None:
+        sep = "" if (text == "" or text.endswith("\n")) else "\n"
+        return text + "%s\n[tui]\n%s\n" % (sep, new_line)
+
+    # Match the exact key (so status_line does not match status_line_use_colors).
+    assign_re = re.compile(r"^\s*%s\s*=" % re.escape(key))
+    for i in range(tui_start + 1, tui_end):
+        if assign_re.match(lines[i]):
+            # The array may span multiple lines; consume until brackets balance.
+            depth = 0
+            started = False
+            j = i
+            while j < tui_end:
+                depth += lines[j].count("[") - lines[j].count("]")
+                started = started or "[" in lines[j]
+                if started and depth <= 0:
+                    break
+                j += 1
+            indent = re.match(r"^(\s*)", lines[i]).group(1)
+            return "".join(lines[:i] + [indent + new_line + "\n"] + lines[j + 1:])
+
+    # [tui] exists but has no such key — insert right after the header.
+    insert_at = tui_start + 1
+    return "".join(lines[:insert_at] + [new_line + "\n"] + lines[insert_at:])
+
+
+# Back-compat thin wrappers (status_line is the common case; tests use these).
+def _codex_status_line_array(items: List[str]) -> str:
+    return _codex_tui_array("status_line", items)
+
+
+def _codex_read_status_line(text: str) -> Optional[List[str]]:
+    return _codex_read_tui_array(text, "status_line")
+
+
+def _codex_apply_status_line(text: str, items: List[str]) -> str:
+    return _codex_apply_tui_array(text, "status_line", items)
+
+
+def _backup_file(path: Path) -> Optional[Path]:
+    """Copy ``path`` to a timestamped ``.echook-bak`` sibling. Best-effort —
+    returns the backup path, or None if the source doesn't exist / copy fails."""
+    if not path.exists():
+        return None
+    try:
+        stamp = time.strftime("%Y%m%d%H%M%S", time.localtime())
+        backup = path.with_name(f"{path.name}.echook-{stamp}.bak")
+        shutil.copy2(path, backup)
+        return backup
+    except OSError:
+        return None
+
+
+def _codex_config_path() -> Path:
+    codex_dir = Path(os.environ.get("CODEX_HOME") or str(Path.home() / ".codex"))
+    return codex_dir / "config.toml"
+
+
+def _cmd_statusline_codex(args: List[str]) -> int:
+    """`audio-hooks statusline codex <show|preview|apply>` — curate Codex's fixed
+    [tui] arrays (status_line and/or terminal_title) so they stop truncating."""
+    action = args[0] if args else "show"
+    rest = args[1:]
+    preset = None
+    items_flag = None
+    target = "status_line"
+    i = 0
+    while i < len(rest):
+        if rest[i] == "--preset" and i + 1 < len(rest):
+            preset = rest[i + 1]
+            i += 2
+        elif rest[i] == "--items" and i + 1 < len(rest):
+            items_flag = rest[i + 1]
+            i += 2
+        elif rest[i] == "--target" and i + 1 < len(rest):
+            target = rest[i + 1]
+            i += 2
+        else:
+            i += 1
+
+    config_path = _codex_config_path()
+
+    # Which [tui] arrays this invocation acts on.
+    if target == "both":
+        targets = ["status_line", "terminal_title"]
+    elif target in CODEX_TUI_TARGETS:
+        targets = [target]
+    else:
+        return emit_error(
+            "INVALID_USAGE",
+            f"Unknown --target '{target}'. Use status_line, terminal_title, or both.",
+        )
+
+    if action == "show":
+        text = ""
+        if config_path.exists():
+            try:
+                text = config_path.read_text(encoding="utf-8")
+            except OSError as e:
+                return emit_error("CONFIG_READ_ERROR", str(e))
+        arrays = {}
+        for key in CODEX_TUI_TARGETS:
+            cur = _codex_read_tui_array(text, key)
+            arrays[key] = {
+                "current": cur,
+                "item_count": len(cur) if cur is not None else 0,
+                # Codex renders each on ONE line; a long list truncates with an
+                # ellipsis. Flag the likely-overflow / redundancy cases.
+                "likely_overflows": (len(cur) if cur is not None else 0) > 10,
+                "presets": list(CODEX_TUI_TARGETS[key]["presets"].keys()),
+            }
+        emit({
+            "ok": True,
+            "config_path": str(config_path),
+            "config_exists": config_path.exists(),
+            # Back-compat top-level mirror of status_line.
+            "current": arrays["status_line"]["current"],
+            "item_count": arrays["status_line"]["item_count"],
+            "likely_overflows": arrays["status_line"]["likely_overflows"],
+            "presets": arrays["status_line"]["presets"],
+            "targets": arrays,
+            "recommended_preset": "balanced",
+            "note": (
+                "Codex's status line / terminal title accept only fixed built-in "
+                "item IDs (no command/script rendering). echook curates them; e.g. "
+                "audio-hooks statusline codex apply --preset balanced --target both"
+            ),
+        })
+        return 0
+
+    if action not in ("preview", "apply"):
+        return emit_error(
+            "INVALID_USAGE",
+            f"Unknown codex statusline action: {action}. Use show|preview|apply.",
+        )
+
+    # --items only makes sense for a single target.
+    if items_flag is not None and len(targets) > 1:
+        return emit_error(
+            "INVALID_USAGE",
+            "--items cannot be combined with --target both; pick one target.",
+        )
+
+    # Resolve the item list per target.
+    resolved: Dict[str, List[str]] = {}
+    for key in targets:
+        presets = CODEX_TUI_TARGETS[key]["presets"]
+        if items_flag is not None:
+            items = [s.strip() for s in items_flag.split(",") if s.strip()]
+            source = "items"
+        else:
+            chosen = preset or "balanced"
+            if chosen not in presets:
+                return emit_error(
+                    "INVALID_USAGE",
+                    f"Unknown preset '{chosen}' for {key}. Choose: {', '.join(presets)}",
+                )
+            items = list(presets[chosen])
+            source = f"preset:{chosen}"
+        if not items:
+            return emit_error("INVALID_USAGE", f"No items resolved for {key} (empty --items?)")
+        resolved[key] = items
+
+    if action == "preview":
+        emit({
+            "ok": True,
+            "config_path": str(config_path),
+            "source": source,
+            "target": target,
+            "items": resolved.get("status_line", resolved[targets[0]]),
+            "resolved": resolved,
+            "toml": {k: _codex_tui_array(k, v) for k, v in resolved.items()},
+            "applied": False,
+        })
+        return 0
+
+    # action == "apply"
+    try:
+        text = config_path.read_text(encoding="utf-8") if config_path.exists() else ""
+    except OSError as e:
+        return emit_error("CONFIG_READ_ERROR", str(e))
+    new_text = text
+    for key, items in resolved.items():
+        new_text = _codex_apply_tui_array(new_text, key, items)
+    # Validate the result parses and round-trips when tomllib is available.
+    try:
+        import tomllib  # type: ignore
+        try:
+            parsed = tomllib.loads(new_text)
+        except Exception as e:
+            return emit_error(
+                "INVALID_CONFIG",
+                f"Refusing to write — result is not valid TOML: {e}",
+            )
+        tui = parsed.get("tui") or {}
+        for key, items in resolved.items():
+            if tui.get(key) != items:
+                return emit_error(
+                    "INTERNAL_ERROR",
+                    f"Refusing to write — {key} did not round-trip as expected.",
+                )
+    except ImportError:
+        pass  # 3.9/3.10: best-effort surgical edit, no validation pass
+    backup = _backup_file(config_path)
+    try:
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(new_text, encoding="utf-8")
+    except OSError as e:
+        return emit_error("INTERNAL_ERROR", str(e))
+    emit({
+        "ok": True,
+        "config_path": str(config_path),
+        "source": source,
+        "target": target,
+        "items": resolved.get("status_line", resolved[targets[0]]),
+        "resolved": resolved,
+        "applied": True,
+        "backup": str(backup) if backup else None,
+        "next_steps": [
+            "Restart Codex (or run /statusline) to reload the status line.",
+        ],
+    })
+    return 0
+
+
 def cmd_statusline(args: List[str]) -> int:
-    """Manage the Claude Code status line registration."""
+    """Manage the status line: Claude Code registration + segment catalog, and
+    Codex [tui].status_line curation."""
     if require_project_root() != 0:
         return 1
     sub = args[0] if args else "show"
     settings_path = Path.home() / ".claude" / "settings.json"
+
+    if sub == "segments":
+        emit({
+            "ok": True,
+            "segments": STATUSLINE_SEGMENTS,
+            "line1": [s["name"] for s in STATUSLINE_SEGMENTS if s["line"] == 1],
+            "line2": [s["name"] for s in STATUSLINE_SEGMENTS if s["line"] == 2],
+            "config": {
+                "visible_segments": "Whitelist — when non-empty, only these show.",
+                "hidden_segments": "Blacklist — applied when visible_segments is empty; show all except these.",
+                "set_example": "audio-hooks set statusline_settings.hidden_segments '[\"burn_rate\",\"api_time\"]'",
+            },
+        })
+        return 0
+
+    if sub == "codex":
+        return _cmd_statusline_codex(args[1:])
 
     if sub == "show":
         statusline_script = PROJECT_ROOT / "bin" / "audio-hooks-statusline.py"
@@ -2362,6 +2761,13 @@ def _build_manifest() -> Dict[str, Any]:
             {"name": "logs clear", "args": [], "description": "Truncate the event log"},
             {"name": "install", "args": ["[--plugin|--scripts|--cursor|--codex]", "[--force]"], "description": "Install non-interactively. --cursor writes ~/.cursor/hooks.json for Cursor IDE users. --codex writes $CODEX_HOME/hooks.json for Codex CLI users. --force overrides DUPLICATE_BRIDGE check (cursor only)."},
             {"name": "uninstall", "args": ["[--plugin|--scripts|--cursor|--codex]", "[--purge]"], "description": "Uninstall non-interactively. --cursor / --codex remove audio-hooks-managed entries from the corresponding hooks.json (--purge also removes the audio-hooks-data directory)."},
+            {"name": "statusline show", "args": [], "description": "Show Claude Code status line registration state"},
+            {"name": "statusline install", "args": [], "description": "Register the echook status line in ~/.claude/settings.json"},
+            {"name": "statusline uninstall", "args": [], "description": "Remove the echook status line registration"},
+            {"name": "statusline segments", "args": [], "description": "List every Claude Code status line segment (name, line, source field, conditional) for configuring visible_segments / hidden_segments"},
+            {"name": "statusline codex show", "args": [], "description": "Show the current Codex [tui].status_line + terminal_title and whether they likely overflow"},
+            {"name": "statusline codex preview", "args": ["[--preset minimal|balanced|full]", "[--items a,b,c]", "[--target status_line|terminal_title|both]"], "description": "Print the curated Codex status_line / terminal_title that would be written (no write)"},
+            {"name": "statusline codex apply", "args": ["[--preset minimal|balanced|full]", "[--items a,b,c]", "[--target status_line|terminal_title|both]"], "description": "Curate Codex [tui].status_line and/or terminal_title in config.toml (backs up first) so they stop truncating. Codex accepts only fixed item IDs — echook curates, it cannot render custom text."},
             {"name": "update", "args": ["[--check]"], "description": "Show current version (real updates go through /plugin update)"},
             {"name": "upgrade", "args": ["[--check-only]", "[--force]"], "description": "Refresh the plugin code (and ~/.claude/plugins/cache/) without losing config. Tries `claude plugin update` first; falls back to uninstall --keep-data + install."},
             {"name": "backup list", "args": [], "description": "JSON array of available backups, newest first"},
@@ -2389,6 +2795,9 @@ def _build_manifest() -> Dict[str, Any]:
             "rate_limit_alerts.enabled",
             "rate_limit_alerts.five_hour_thresholds",
             "rate_limit_alerts.seven_day_thresholds",
+            "statusline_settings.visible_segments",
+            "statusline_settings.hidden_segments",
+            "statusline_settings.max_width",
         ],
         "themes": ["default", "custom"],
         "log_schema": "audio-hooks.v1",

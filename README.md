@@ -108,27 +108,28 @@ Pins your Claude Code startup banner at the bottom (so it never scrolls away) an
 | 🔴 Red | > 80% | Danger — frequent errors | `/compact` immediately |
 
 <details>
-<summary><kbd>14 customisable status-line segments</kbd></summary>
+<summary><kbd>29 customisable status-line segments</kbd></summary>
 <br>
+
+A few of the highlights (run `audio-hooks statusline segments` for the full live catalog):
 
 | Segment | Shows |
 |---|---|
 | `model` | Model name (e.g. `[Opus 4.8 (1M context)]`) |
-| `effort` | Reasoning effort level (`🧠 high`) |
+| `effort` / `thinking` | Reasoning effort (`🧠 high`) / extended-thinking flag |
 | `cc_version` | Claude Code's own version (`⚡ CC v2.1.193`) |
-| `cwd` | Current working directory (which project you're in) |
-| `version` | echook version |
-| `sounds` | Enabled sound count |
-| `webhook` | Webhook status |
-| `theme` | Audio theme |
-| `snooze` | Mute countdown (when active) |
-| `branch` | Git branch name |
-| `api_quota` | 5-hour API usage quota bar + reset time |
-| `weekly_quota` | 7-day weekly limit bar + reset time |
-| `context` | Context window usage bar (+ absolute tokens, + `/compact` hint) |
-| `cost` | Session cost + lines added/removed (`💲 $0.42 +156/-23`) |
+| `cwd` / `repo` | Working directory / git remote `owner/name` |
+| `session_name` / `agent` / `output_style` / `vim` | Session label / `--agent` name / output style / vim mode |
+| `branch` / `git_dirty` / `worktree` | Git branch / uncommitted-change count / managed worktree |
+| `pr` / `added_dirs` | Pull-request number + review state / `/add-dir` count |
+| `api_quota` / `weekly_quota` | 5-hour & 7-day rate-limit bars + reset times |
+| `context` / `tokens` / `exceeds_200k` | Context bar (+ tokens, `/compact` hint) / cache-hit ratio / >200K flag |
+| `cost` / `duration` / `api_time` / `burn_rate` | Cost + lines diff / wall-clock time / API-wait share / $/hour |
+| `version` · `sounds` · `webhook` · `theme` · `snooze` | echook version · sound count · webhook · audio theme · mute countdown |
 
-Each logical line auto-reflows into as many rows as your terminal width needs — segments are never split, so nothing is cut off. Quota/cost/effort segments self-omit when Claude Code doesn't supply that data. Trim with `visible_segments` or pin the width with `statusline_settings.max_width`.
+Most richer segments self-omit when Claude Code doesn't supply their data, so a plain session stays clean. Pick segments with `visible_segments` (whitelist) or drop a few with `hidden_segments` (blacklist). Each logical line auto-reflows into as many rows as your terminal width needs — segments are never split, so nothing is cut off. Pin the width with `statusline_settings.max_width`.
+
+> **Codex note:** Codex's status line is *not* command-backed — it only accepts a fixed list of built-in item IDs. echook can't render custom Codex segments, but it can **curate** the list so it stops truncating: `audio-hooks statusline codex apply --preset balanced`.
 
 </details>
 

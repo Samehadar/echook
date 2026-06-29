@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [6.3.0] - 2026-06-29
+
+Status-line release: the Claude Code status line grows from 14 to **29 segments** (every useful field Claude Code pipes to a status line script), and echook gains the ability to **curate the Codex status line** so it stops truncating with an ellipsis.
+
+### Added
+
+- **15 new Claude Code status line segments** (verified against code.claude.com/docs/en/statusline), each individually toggleable and most self-omitting when their data is absent:
+  - Line 1: `session_name`, `agent`, `thinking`, `vim`, `output_style`, `repo`
+  - Line 2: `git_dirty` (cached `git status --porcelain`), `worktree`, `pr`, `added_dirs`, `tokens` (cache-hit ratio), `exceeds_200k`, `duration`, `api_time`, `burn_rate` ($/hour)
+- **`statusline_settings.hidden_segments`** — a blacklist applied when `visible_segments` is empty, so a user can drop a few segments from the comprehensive default without enumerating every keeper.
+- **`audio-hooks statusline segments`** — JSON catalog of every segment (name, line, source field, conditional) for discovery and configuration.
+- **`audio-hooks statusline codex show|preview|apply`** — curate Codex's `[tui].status_line` **and `terminal_title`** in `config.toml` (`--target status_line|terminal_title|both`). Codex's status line is **not command-backed** (it accepts only fixed built-in item IDs; command rendering is open feature request openai/codex#20140), so echook curates the fixed lists rather than rendering custom text. Presets — status line: `minimal` (4) / `balanced` (8, recommended) / `full` (14); terminal title: `minimal` (2) / `balanced` (4) / `full` (6), all de-duplicated. `apply` backs up `config.toml` first and surgically edits *only* the targeted array(s), preserving all other tables, comments, and formatting.
+
+### Changed
+
+- The status line default (empty `visible_segments`) now shows the full 29-segment catalog; richer segments render only when Claude Code supplies their data, so a plain session stays uncluttered while a rich one shows the full picture. `visible_segments` whitelisting is unchanged and back-compatible.
+
 ## [6.2.0] - 2026-06-26
 
 Complete-the-hook-surface release: every lifecycle event the three editors now document is mapped to echook's two tracks. **13 new canonical events (26 → 39 total)**, all opt-in (default off). Codex was already complete at 10 events and is unchanged.
