@@ -152,14 +152,22 @@ After any status line refresh, the latest stdin JSON is dumped to `${state_dir}/
 
 > ⚠️ The dump may contain workspace paths and the last assistant message — disable `CLAUDE_HOOKS_DEBUG` when not actively diagnosing.
 
-### Status line is cut off with an ellipsis (`Webho…`, `+743/-…`)
+### Status line is cut off with an ellipsis (`Webho…`, `Theme: Chim…`, `+743/-…`)
 
-Since v6.1.0 each line auto-reflows into as many rows as your terminal width needs, so this should not happen. If it still does, one of these applies:
+Since v6.1.0 each line auto-reflows into as many rows as your terminal width needs, and v6.3.1 widened the safety margin (4→8) so emoji-dense rows landing on the budget boundary wrap instead of clipping. So this should not happen on a current build. If it still does, one of these applies:
 
 - **Old Claude Code (< v2.1.153).** Those versions don't export the `COLUMNS` env var, so the script can't detect your width and falls back to assuming 80 columns. Either update Claude Code, or pin your real width: `audio-hooks set statusline_settings.max_width <columns>` (e.g. `120`).
 - **Your terminal reports a width wider than what's usable** (unusual padding, a wrapping prompt, etc.). Pin it lower: `audio-hooks set statusline_settings.max_width <columns>`. Set it back to auto with `audio-hooks set statusline_settings.max_width 0`.
-- **Too many rows instead?** That's the no-truncation trade-off — trim segments to taste, e.g. `audio-hooks set statusline_settings.visible_segments '["model","cwd","context","weekly_quota"]'`.
+- **Too many rows instead?** That's the no-truncation trade-off — trim segments to taste, e.g. `audio-hooks set statusline_settings.hidden_segments '["burn_rate","api_time","duration"]'` (drop a few) or `audio-hooks set statusline_settings.visible_segments '["model","cwd","context","weekly_quota"]'` (whitelist only these).
 - **Re-running `audio-hooks statusline install`** re-registers the line with `padding: 0` (full terminal width), which maximises usable space.
+
+### Codex status bar is truncated, redundant, or shows too little
+
+Codex's status line is **not** command-backed — echook can't render it, only **curate** the fixed `[tui].status_line` / `terminal_title` item lists in `~/.codex/config.toml`. Common cases:
+
+- **Truncated with `…` / duplicated items** (e.g. `gpt-5.5 xhigh … gpt-5.5 · xhigh`, `Context 100% left · Context 0% used`): too many redundant IDs on Codex's single line. Fix: `audio-hooks statusline codex apply --preset balanced` (add `--target both` to also fix the tab title). Restart Codex or run `/statusline`.
+- **A configured item shows nothing:** an item with no value isn't drawn — e.g. `git-branch`/`branch-changes` outside a git repo, `five-hour-limit` before any usage. That's Codex behaviour, not a bug. A sparse bar usually means a fresh session / non-repo cwd. Use `--preset full` for the maximum set; some IDs still fill in only once their data exists.
+- **Inspect / preview first:** `audio-hooks statusline codex show` (current arrays + overflow flag), `audio-hooks statusline codex preview --preset full --target both` (no write). `apply` always backs up `config.toml` first. See [STATUS_LINE.md](STATUS_LINE.md#codex-status-line-curation-only).
 
 ### Cursor IDE: no audio at all
 

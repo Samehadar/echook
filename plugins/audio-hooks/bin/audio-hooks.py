@@ -2907,6 +2907,7 @@ def _build_manifest() -> Dict[str, Any]:
             "changelog": "CHANGELOG.md",
             "architecture": "docs/ARCHITECTURE.md",
             "troubleshooting": "docs/TROUBLESHOOTING.md",
+            "status_line": "docs/STATUS_LINE.md",
             "canonical_sources": [
                 "hooks/", "bin/", "audio/", "config/",
                 "cursor-hooks/", "codex-hooks/",

@@ -131,6 +131,8 @@ Most richer segments self-omit when Claude Code doesn't supply their data, so a 
 
 > **Codex note:** Codex's status line is *not* command-backed — it only accepts a fixed list of built-in item IDs. echook can't render custom Codex segments, but it can **curate** the list so it stops truncating: `audio-hooks statusline codex apply --preset balanced`.
 
+📖 Full reference: [**docs/STATUS_LINE.md**](docs/STATUS_LINE.md) — every segment, both editors, all flags.
+
 </details>
 
 ### 🎚️ More

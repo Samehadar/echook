@@ -29,6 +29,7 @@ Verify with `audio-hooks status` + `audio-hooks diagnose` + `audio-hooks test al
 ## Pointers (also exposed as `audio-hooks manifest.pointers`)
 
 - **Natural-language → CLI mapping:** `plugins/audio-hooks/skills/audio-hooks/SKILL.md` (auto-loaded on audio-related prompts — covers the full decision tree).
+- **Status line (both editors):** `docs/STATUS_LINE.md` — the complete reference for track 2 (Claude Code renders 29 segments; Codex curates a fixed item list). Live truth: `audio-hooks statusline segments` / `audio-hooks statusline codex show`.
 - **Human docs:** `README.md`, `docs/INSTALLATION_GUIDE.md`, `CHANGELOG.md`, `docs/ARCHITECTURE.md`, `docs/TROUBLESHOOTING.md`.
 - **Canonical sources:** `/hooks/`, `/bin/`, `/audio/`, `/config/`, `/cursor-hooks/`, `/codex-hooks/`. `/plugins/audio-hooks/{audio,bin,hooks,config,cursor-hooks,codex-hooks}/` mirror these — never edit by hand. `plugin.json`, `runner/run.py`, `skills/` are hand-edited under `/plugins/audio-hooks/` directly.
 

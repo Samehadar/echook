@@ -146,14 +146,22 @@ Each row is one message you can paste into your AI agent (Claude Code / Cursor /
 | **Rate-limit Alerts** | |
 | Enable with custom thresholds | *"Enable audio-hooks rate-limit alerts at 80% and 95% for both windows."* |
 | Adjust 5-hour thresholds | *"Set audio-hooks 5-hour rate-limit thresholds to 75% and 90%."* |
-| **Status Line** | |
+| **Status Line (Claude Code)** | |
 | Add a status bar | *"Install the audio-hooks status line."* |
+| What can it show? | *"List all the audio-hooks status line segments."* (runs `statusline segments`) |
 | Status bar: context only | *"Only show context usage in the audio-hooks status line."* |
 | Status bar: weekly limit only | *"Show only my weekly limit in the audio-hooks status line."* |
 | Status bar: cost + model + effort | *"Show session cost, the model, and effort in the status line."* |
+| Status bar: session duration / burn rate / git changes | *"Show how long I've been running, my cost per hour, and uncommitted git changes."* |
+| Status bar: drop a few segments | *"Hide burn rate and api time but keep everything else in the status line."* (sets `hidden_segments`) |
 | Status bar: show everything | *"Reset the audio-hooks status line to show all segments."* |
-| Status bar: too many rows | *"Pin the audio-hooks status line width to 120 columns."* |
+| Status bar: too many rows / truncated | *"Pin the audio-hooks status line width to 120 columns."* |
 | Remove status bar | *"Uninstall the audio-hooks status line."* |
+| **Status Line (Codex — curation only)** | |
+| Codex bar is cut off / shows `…` | *"Fix my Codex status bar — it's truncated."* (runs `statusline codex apply --preset balanced`) |
+| Codex bar + tab title | *"Curate both my Codex status line and terminal title."* (`--target both`) |
+| Preview before applying | *"Preview the full Codex status line preset."* |
+| Inspect current Codex bar | *"Show my current Codex status line."* |
 | **File Watching** | |
 | Watch .env for changes | *"Enable the audio-hooks file_changed hook and watch `.env` and `.envrc`."* |
 | **Monitor & Debug** | |
