@@ -49,15 +49,31 @@ fade-in begins as the music actually returns. A self-healing lock
 (`$TMPDIR/echook_duck.lock`, 20s TTL) keeps overlapping or killed alerts from
 stranding the volume.
 
+## Stay silent while dictating (VoiceInk) / on a call
+
+Before doing anything, the alert is **skipped entirely** if the microphone is in
+use — so it can't break through VoiceInk's recording (or a call). The desktop
+toast still fires, so you don't miss the notification. Mic state is read from
+CoreAudio (`kAudioDevicePropertyDeviceIsRunningSomewhere` on the default input
+device) by the tiny `echook-mic-busy` helper (`scripts/echook-mic-busy.swift`).
+The alert is also skipped if the output is muted.
+
+(Detecting the mic, rather than VoiceInk's own state, is what makes it robust:
+VoiceInk's recording state isn't exposed externally, but the mic-in-use flag is,
+and it covers any dictation/call app.)
+
 ## Setup
 
 ```bash
 brew install media-control
-bash scripts/echook-media-agents-setup.sh   # registers the 3 LaunchAgents (auto-load on login)
+bash scripts/echook-media-agents-setup.sh   # registers the 3 LaunchAgents (login) + builds echook-mic-busy
 ```
 
+(`scripts/echook-mic-busy.swift` must sit next to the setup script so it can
+compile the helper to `~/.claude/bin/echook-mic-busy`; needs Xcode CLT / swiftc.)
+
 The patch lives in `hooks/hook_runner.py` → `play_audio_macos` (marked
-`echook-duck v10`). Tunables at the top of that function: `ALERT_V`, `DOWN_MS`,
+`echook-duck v12`). Tunables at the top of that function: `ALERT_V`, `DOWN_MS`,
 `UP_MS`, `PAUSE_WAIT`, `RESUME_DELAY`, `RAMP_STEPS`.
 
 ## Notes

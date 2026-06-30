@@ -1048,10 +1048,15 @@ Remove-Item -Path $MyInvocation.MyCommand.Path -Force -ErrorAction SilentlyConti
 def play_audio_macos(audio_file: Path) -> bool:
     """Play audio on macOS using afplay.
 
-    echook-duck v10 (LOCAL PATCH, not upstream -- reapply via
+    echook-duck v12 (LOCAL PATCH, not upstream -- reapply via
     ~/.claude/echook-duck-patch.py after `audio-hooks upgrade`).
 
-    Pauses the macOS Now Playing media (Chrome/YouTube/Telegram/etc) for the alert
+    If the mic is in use (you're dictating in VoiceInk or on a call) or the output
+    is muted, the alert audio is skipped entirely -- it neither plays nor touches
+    the volume. The desktop toast still fires, so you still get a notification.
+    Mic state comes from CoreAudio via the echook-mic-busy helper.
+
+    Otherwise: pauses the macOS Now Playing media (Chrome/YouTube/Telegram/etc) for the alert
     via media-control LaunchAgents:
       (1) fade music volume out to 0  (2) pause  (3) volume to full + play alert
       (4) volume to 0, resume         (5) fade music volume back in from 0 to prev
@@ -1075,6 +1080,7 @@ def play_audio_macos(audio_file: Path) -> bool:
     A_GET = "com.echook.get"
     A_PAUSE = "com.echook.pause"
     A_PLAY = "com.echook.play"
+    MIC_BUSY = os.path.expanduser("~/.claude/bin/echook-mic-busy")
 
     def _get_volume():
         try:
@@ -1138,10 +1144,36 @@ def play_audio_macos(audio_file: Path) -> bool:
             _time.sleep(0.05)
         return False
 
+    def _is_muted():
+        try:
+            out = subprocess.run(
+                ["osascript", "-e", "output muted of (get volume settings)"],
+                capture_output=True, text=True, timeout=3,
+            )
+            return "true" in (out.stdout or "").strip().lower()
+        except Exception:
+            return False
+
+    def _mic_busy():
+        # True while the default input device is in use (dictation / call), via
+        # CoreAudio kAudioDevicePropertyDeviceIsRunningSomewhere (echook-mic-busy).
+        try:
+            return subprocess.run([MIC_BUSY], stdout=subprocess.DEVNULL,
+                                  stderr=subprocess.DEVNULL, timeout=3).returncode == 0
+        except Exception:
+            return False
+
+    # Stay silent (and don't touch volume) while the mic is in use -- e.g. you are
+    # dictating in VoiceInk, or on a call -- or if output is muted. The desktop
+    # toast still fires separately, so you still get a glanceable notification.
+    if _mic_busy() or _is_muted():
+        log_debug("mic busy or output muted -> skipping alert audio")
+        return True
+
     prev = _get_volume()
     owns_lock = False
     paused = False
-    duck = None  # kept for compatibility; v10 fades fully to 0
+    duck = None  # kept for compatibility; v11 fades fully to 0
     if prev is not None and prev > 5:
         try:
             if os.path.exists(LOCK) and (_time.time() - os.path.getmtime(LOCK)) > LOCK_TTL:

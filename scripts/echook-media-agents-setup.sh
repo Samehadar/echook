@@ -49,6 +49,22 @@ make_agent com.echook.get   "$MEDIA" get
 make_agent com.echook.pause "$MEDIA" pause
 make_agent com.echook.play  "$MEDIA" play
 
+# Build the mic-busy probe -- the patch uses it to stay silent while you dictate
+# (VoiceInk) or are on a call, without breaking the mic session.
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+MIC_SRC="$SCRIPT_DIR/echook-mic-busy.swift"
+MIC_BIN="$HOME/.claude/bin/echook-mic-busy"
+if [ -f "$MIC_SRC" ]; then
+  mkdir -p "$HOME/.claude/bin"
+  if swiftc -O -o "$MIC_BIN" "$MIC_SRC" -framework CoreAudio -framework Foundation 2>/dev/null; then
+    echo "built: echook-mic-busy"
+  else
+    echo "WARN: could not build echook-mic-busy (need Xcode Command Line Tools / swiftc)"
+  fi
+else
+  echo "WARN: $MIC_SRC not found next to this script; mic-busy detection disabled"
+fi
+
 echo
 echo "done. media-control: $MEDIA"
 echo "test:  launchctl kickstart -k gui/$UID_/com.echook.pause   (should pause your music)"
