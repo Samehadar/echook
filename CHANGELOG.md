@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **macOS: pause the now-playing media during alerts, and stay silent while you dictate (fork addition).** On macOS the alert pauses whatever is playing (Chrome / YouTube / Telegram / Spotify, via `media-control` / `mediaremote-adapter` driven through on-demand launchd agents), plays at full volume, then resumes with smooth fade-out/in. If the microphone is in use (dictating in VoiceInk, or on a call) or the output is muted, the alert audio is skipped entirely — the desktop toast still fires. Implemented in `hooks/hook_runner.py` (`play_audio_macos`, marker `echook-duck v12`) with `scripts/echook-mic-busy.swift` + `scripts/echook-media-agents-setup.sh`. See [`docs/MEDIA_PAUSE.md`](docs/MEDIA_PAUSE.md).
+
 ## [6.3.3] - 2026-06-30
 
 ### Docs

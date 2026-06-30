@@ -88,6 +88,10 @@ Hear (or get pinged) the moment your agent finishes, asks for permission, fails 
 | **TTS** | Speaks a sanitized summary of Claude's actual final message when you're away from the screen. |
 | **Webhook** | Slack / Discord / Teams / ntfy / any HTTP endpoint — get alerts on your phone. |
 
+### 🎵 macOS — pause your music during alerts *(fork addition)*
+
+On macOS this fork **pauses whatever is playing** (Chrome / YouTube / Telegram / Spotify …), plays the alert at full volume, then **resumes it with smooth fades** — instead of talking over your music. And while you're **dictating** (e.g. VoiceInk) or **on a call**, the alert audio is **skipped entirely** — the desktop toast still fires, so it never breaks through your recording. Setup + how it works: **[docs/MEDIA_PAUSE.md](docs/MEDIA_PAUSE.md)**.
+
 ### 📊 Status Line — startup-banner pin + context monitor
 
 Pins your Claude Code startup banner at the bottom (so it never scrolls away) and adds real-time **context-window** and **quota** bars — color-coded warnings before Claude enters the "agent dumb zone". Auto-reflows to fit any terminal width, so nothing is truncated.
