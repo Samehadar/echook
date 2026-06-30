@@ -1046,15 +1046,129 @@ Remove-Item -Path $MyInvocation.MyCommand.Path -Force -ErrorAction SilentlyConti
 
 
 def play_audio_macos(audio_file: Path) -> bool:
-    """Play audio on macOS using afplay."""
+    """Play audio on macOS using afplay.
+
+    echook-duck v10 (LOCAL PATCH, not upstream -- reapply via
+    ~/.claude/echook-duck-patch.py after `audio-hooks upgrade`).
+
+    Pauses the macOS Now Playing media (Chrome/YouTube/Telegram/etc) for the alert
+    via media-control LaunchAgents:
+      (1) fade music volume out to 0  (2) pause  (3) volume to full + play alert
+      (4) volume to 0, resume         (5) fade music volume back in from 0 to prev
+    Only pauses when `get` reports something playing. Self-healing lock; restore
+    in a finally block. See echook-media-agents-setup.sh for the agents.
+    """
+    import tempfile as _tempfile
+    import time as _time
+    import json as _json
     log_debug(f"macOS audio playback: {audio_file}")
+    ALERT_V = "1.3"      # afplay -v gain for the alert (media paused -> just presence)
+    DOWN_MS = 110        # fade-out duration before pause
+    UP_MS = 320          # fade-in duration after resume (longer = prettier)
+    RAMP_STEPS = 7
+    PAUSE_WAIT = 0.12    # after kicking pause, before going loud (short on purpose)
+    RESUME_DELAY = 0.18  # after kicking play, before the fade-in (media-control latency)
+    LOCK = os.path.join(_tempfile.gettempdir(), "echook_duck.lock")
+    LOCK_TTL = 20
+    NP = "/tmp/echook_np.json"
+    UID = os.getuid()
+    A_GET = "com.echook.get"
+    A_PAUSE = "com.echook.pause"
+    A_PLAY = "com.echook.play"
+
+    def _get_volume():
+        try:
+            out = subprocess.run(
+                ["osascript", "-e", "output volume of (get volume settings)"],
+                capture_output=True, text=True, timeout=3,
+            )
+            return int(out.stdout.strip())
+        except Exception:
+            return None
+
+    def _set_volume(v):
+        try:
+            subprocess.run(
+                ["osascript", "-e", f"set volume output volume {int(v)}"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=3,
+            )
+        except Exception:
+            pass
+
+    def _ramp(frm, to, ms):
+        # Whole fade in ONE osascript launch; per-step delays run inside the
+        # AppleScript loop (a separate osascript per step would dominate latency).
+        if frm == to:
+            return
+        delay = (ms / 1000.0) / RAMP_STEPS
+        args = ["osascript"]
+        for i in range(1, RAMP_STEPS + 1):
+            v = round(frm + (to - frm) * i / RAMP_STEPS)
+            args += ["-e", f"set volume output volume {v}", "-e", f"delay {delay:.3f}"]
+        try:
+            subprocess.run(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5)
+        except Exception:
+            pass
+
+    def _kick(label):
+        try:
+            subprocess.run(
+                ["launchctl", "kickstart", "-k", f"gui/{UID}/{label}"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5,
+            )
+            return True
+        except Exception:
+            return False
+
+    def _is_playing():
+        try:
+            os.remove(NP)
+        except OSError:
+            pass
+        if not _kick(A_GET):
+            return False
+        end = _time.time() + 1.3
+        while _time.time() < end:
+            try:
+                d = _json.load(open(NP))
+                if d.get("bundleIdentifier"):
+                    return bool(d.get("playing"))
+            except Exception:
+                pass
+            _time.sleep(0.05)
+        return False
+
+    prev = _get_volume()
+    owns_lock = False
+    paused = False
+    duck = None  # kept for compatibility; v10 fades fully to 0
+    if prev is not None and prev > 5:
+        try:
+            if os.path.exists(LOCK) and (_time.time() - os.path.getmtime(LOCK)) > LOCK_TTL:
+                os.remove(LOCK)
+        except OSError:
+            pass
+        try:
+            fd = os.open(LOCK, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            os.write(fd, str(prev).encode())
+            os.close(fd)
+            owns_lock = True
+        except FileExistsError:
+            owns_lock = False
+
+    if owns_lock and _is_playing():
+        _ramp(prev, 0, DOWN_MS)        # (1) fade music out to 0
+        _kick(A_PAUSE)                 # (2) pause
+        _time.sleep(PAUSE_WAIT)
+        paused = True
+        _set_volume(prev)              # (3) volume to full -- media is paused/silent
+
     try:
-        proc = subprocess.Popen(
-            ["afplay", str(audio_file)],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL
+        subprocess.run(
+            ["afplay", "-v", ALERT_V, str(audio_file)],   # (3) full clean alert
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=15,
         )
-        log_debug(f"Started afplay (PID: {proc.pid})")
+        log_debug(f"Played afplay (owns_lock={owns_lock}, paused={paused}, prev={prev})")
         return True
     except FileNotFoundError:
         log_error("afplay not found")
@@ -1062,6 +1176,19 @@ def play_audio_macos(audio_file: Path) -> bool:
     except Exception as e:
         log_error(f"afplay failed: {e}")
         return False
+    finally:
+        if owns_lock:
+            try:
+                if paused:
+                    _set_volume(0)         # (4) silence before resuming
+                    _kick(A_PLAY)          # (4) resume playback
+                    _time.sleep(RESUME_DELAY)
+                    _ramp(0, prev, UP_MS)  # (5) fade music back in from 0 to prev
+            finally:
+                try:
+                    os.remove(LOCK)
+                except OSError:
+                    pass
 
 
 def play_audio_linux(audio_file: Path) -> bool:
